@@ -1,0 +1,22 @@
+# per-target run outputs — don't commit
+runs/
+.autobot/
+
+# build outputs
+build/
+DerivedData/
+
+# logs
+*.log
+
+# macOS
+.DS_Store
+
+# editor
+.vscode/
+.idea/
+*.swp
+
+# temp
+*.tmp
+*.aiff

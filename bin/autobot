@@ -1,0 +1,499 @@
+#!/usr/bin/env bash
+# autobot — visual iOS QA driven by Claude Code + mobile-mcp.
+#
+# Subcommands:
+#   wizard                                   Interactive setup: pick sim+app, describe,
+#                                            list flows, write config. Runs immediately.
+#   go                                       Run the saved main flow against the saved
+#                                            app+sim, notify on completion, open report.
+#   init <app-path>                          Builds, boots sim, runs discovery.
+#   attach <udid> <bundle-id>                Discover against an already-running sim.
+#   flow <udid> <bundle-id> <flow-file.md>   Execute a user-authored test plan.
+#   run                                      Re-run discovered flows + HTML report.
+#   speak <phrase>                           TTS a phrase + play to default output
+#                                            (feeds the sim's mic if loopback set up).
+#   tts <phrase> [out.aiff]                  TTS only, no playback. Echoes file path.
+#   doctor                                   Verify environment.
+#   help                                     Show this.
+#
+# Run from inside the target app's repo (or a sibling dir). autobot writes its
+# state under `./.autobot/`.
+
+set -euo pipefail
+
+AUTOBOT_HOME="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+source "$AUTOBOT_HOME/src/lib/sim.sh"
+source "$AUTOBOT_HOME/src/lib/build.sh"
+source "$AUTOBOT_HOME/src/lib/claude.sh"
+source "$AUTOBOT_HOME/src/lib/audio.sh"
+source "$AUTOBOT_HOME/src/lib/notify.sh"
+source "$AUTOBOT_HOME/src/lib/wizard.sh"
+source "$AUTOBOT_HOME/src/lib/install.sh"
+
+usage() {
+  cat <<EOF
+autobot — visual iOS QA driven by Claude Code + mobile-mcp
+
+Usage:
+  autobot install                                     One-shot install of all deps
+  autobot wizard                                      Interactive setup + run
+  autobot go                                          Run the saved main flow + notify
+  autobot init <path-to-app>                          Discover flows (first-time setup)
+  autobot attach <udid> <bundle-id>                   Discover against a running sim
+  autobot flow <udid> <bundle-id> <flow-file.md>      Execute a custom test plan
+  autobot run                                         Re-run discovered flows + report
+  autobot speak <phrase>                              TTS + play (feeds sim mic via loopback)
+  autobot tts <phrase> [out.aiff]                     TTS only, echo file path
+  autobot setup-audio                                 Install BlackHole + switchaudio-osx
+  autobot doctor                                      Verify environment
+  autobot help
+
+<path-to-app> may be:
+  /path/to/MyApp.xcodeproj
+  /path/to/MyApp.xcworkspace
+  /path/to/MyApp.app            (pre-built simulator bundle)
+
+Env:
+  AUTOBOT_SIM_DEVICE      Simulator device name (default: "iPhone 15")
+  AUTOBOT_SCHEME          xcodebuild scheme (default: first scheme found)
+  AUTOBOT_CLAUDE_MODEL    Claude model (default: claude-opus-4-7)
+EOF
+}
+
+cmd_doctor() {
+  local ok=1
+  for bin in xcrun xcodebuild claude npx /usr/bin/python3 say afplay; do
+    if command -v "$bin" >/dev/null 2>&1; then
+      echo "ok   $bin"
+    else
+      echo "MISS $bin"; ok=0
+    fi
+  done
+  if xcrun simctl list runtimes available 2>/dev/null | grep -q iOS; then
+    echo "ok   iOS simulator runtime"
+  else
+    echo "MISS iOS simulator runtime — install via Xcode > Settings > Platforms"
+    ok=0
+  fi
+  # Audio-loopback check is informational, not a hard failure (only voice flows need it).
+  audio_doctor || true
+  [ "$ok" = 1 ] && echo "all good." || { echo "missing tools above."; exit 1; }
+}
+
+cmd_setup_audio() {
+  audio_install_loopback
+}
+
+cmd_install() {
+  install_all "$AUTOBOT_HOME"
+}
+
+cmd_speak() {
+  local phrase="${1:-}"
+  if [ -z "$phrase" ]; then
+    echo "ERR: autobot speak <phrase>" >&2; exit 1
+  fi
+  audio_speak "$phrase"
+}
+
+cmd_tts() {
+  local phrase="${1:-}" out_path="${2:-}"
+  if [ -z "$phrase" ]; then
+    echo "ERR: autobot tts <phrase> [out.aiff]" >&2; exit 1
+  fi
+  local file; file=$(audio_synthesize "$phrase")
+  if [ -n "$out_path" ]; then
+    mv "$file" "$out_path"
+    echo "$out_path"
+  else
+    echo "$file"
+  fi
+}
+
+# Build (if needed), boot sim, install, launch. Echoes a JSON status to stdout.
+prepare_app() {
+  local app_path="$1" report_dir="$2"
+  local kind; kind=$(build_detect_kind "$app_path")
+
+  echo ">> Resolving simulator device..." >&2
+  local udid; udid=$(sim_ensure_device)
+  echo ">> Using UDID: $udid" >&2
+
+  local app_bundle
+  case "$kind" in
+    app)
+      app_bundle="$app_path"
+      ;;
+    xcodeproj|xcworkspace)
+      local scheme derived
+      scheme=$(build_resolve_scheme "$app_path" "$kind")
+      derived=".autobot/build"
+      echo ">> Building scheme '$scheme' for simulator..." >&2
+      app_bundle=$(build_for_simulator "$app_path" "$scheme" "$udid" "$derived")
+      ;;
+    *)
+      echo "ERR: unsupported app input: $app_path" >&2
+      echo "     expected .xcodeproj / .xcworkspace / .app" >&2
+      exit 1
+      ;;
+  esac
+
+  echo ">> Booting simulator..." >&2
+  sim_boot "$udid"
+
+  echo ">> Installing $app_bundle..." >&2
+  sim_install "$udid" "$app_bundle"
+
+  local bundle_id; bundle_id=$(sim_bundle_id "$app_bundle")
+  echo ">> Launching $bundle_id..." >&2
+  sim_launch "$udid" "$bundle_id" >/dev/null
+
+  # Persist run config so the Claude prompt can read it.
+  mkdir -p "$report_dir"
+  cat > "$report_dir/run.json" <<EOF
+{
+  "udid": "$udid",
+  "bundleId": "$bundle_id",
+  "appBundle": "$app_bundle",
+  "appInput": "$app_path",
+  "kind": "$kind"
+}
+EOF
+
+  echo "$udid"
+}
+
+cmd_init() {
+  local app_path="${1:-}"
+  if [ -z "$app_path" ]; then
+    echo "ERR: autobot init <path-to-app>" >&2; exit 1
+  fi
+  if [ ! -e "$app_path" ]; then
+    echo "ERR: app path does not exist: $app_path" >&2; exit 1
+  fi
+  app_path="$(cd "$(dirname "$app_path")" && pwd)/$(basename "$app_path")"
+
+  mkdir -p .autobot
+  local run_id; run_id="$(date +%Y-%m-%d-%H%M%S)"
+  local report_dir=".autobot/reports/$run_id"
+
+  # Persist app pointer for future `run`s.
+  cat > .autobot/config.json <<EOF
+{
+  "appInput": "$app_path",
+  "simDevice": "${AUTOBOT_SIM_DEVICE:-iPhone 15}"
+}
+EOF
+
+  local udid; udid=$(prepare_app "$app_path" "$report_dir")
+
+  # Wire up the per-target .mcp.json + critique rubric.
+  claude_write_mcp_config .autobot/.mcp.json "$udid"
+  cp "$AUTOBOT_HOME/src/templates/critique-rubric.md" .autobot/critique-rubric.md
+
+  # Seed the target's CLAUDE.md from the template if missing.
+  if [ ! -f .autobot/CLAUDE.md ]; then
+    sed "s/{{APP_NAME}}/$(basename "$app_path" | sed 's/\.[^.]*$//')/" \
+      "$AUTOBOT_HOME/src/templates/app-CLAUDE.md" > .autobot/CLAUDE.md
+  fi
+
+  # Build the discovery prompt with run-specific context.
+  local prompt; prompt=$(mktemp)
+  {
+    echo "# Run context"
+    echo
+    echo "- Run ID: \`$run_id\`"
+    echo "- Report dir: \`$report_dir\`"
+    echo "- Simulator UDID: \`$udid\`"
+    echo "- App: \`$app_path\`"
+    echo
+    cat "$AUTOBOT_HOME/src/templates/discover-prompt.md"
+  } > "$prompt"
+
+  local composed; composed=$(claude_compose_prompt "$prompt")
+  echo ">> Starting discovery (Claude will drive the sim)..." >&2
+  claude_run "$composed" "$(pwd)/.autobot/.mcp.json" "$(pwd)"
+  rm -f "$prompt" "$composed"
+
+  ln -snf "$run_id" .autobot/reports/latest
+  echo ">> Discovery complete. Edit .autobot/CLAUDE.md to refine flows."
+  echo ">> Then run: autobot run"
+}
+
+cmd_attach() {
+  local udid="${1:-}" bundle_id="${2:-}"
+  if [ -z "$udid" ] || [ -z "$bundle_id" ]; then
+    echo "ERR: autobot attach <udid> <bundle-id>" >&2; exit 1
+  fi
+
+  # Verify the sim is booted and the app is installed.
+  # Note: capture to var first — pipefail + grep -q (early exit) causes SIGPIPE
+  # on the producer, which would make the pipeline non-zero.
+  local booted_list installed_apps
+  booted_list=$(xcrun simctl list devices booted 2>/dev/null || true)
+  if ! echo "$booted_list" | grep -q "$udid"; then
+    echo "ERR: simulator $udid is not booted." >&2; exit 1
+  fi
+  installed_apps=$(xcrun simctl listapps "$udid" 2>/dev/null || true)
+  if ! echo "$installed_apps" | grep -q "\"$bundle_id\""; then
+    echo "ERR: bundle $bundle_id is not installed on $udid." >&2; exit 1
+  fi
+
+  mkdir -p .autobot
+  local run_id; run_id="$(date +%Y-%m-%d-%H%M%S)"
+  local report_dir=".autobot/reports/$run_id"
+  mkdir -p "$report_dir"
+
+  # Persist target pointer for future `run`s.
+  cat > .autobot/config.json <<EOF
+{
+  "mode": "attach",
+  "udid": "$udid",
+  "bundleId": "$bundle_id"
+}
+EOF
+  cat > "$report_dir/run.json" <<EOF
+{
+  "udid": "$udid",
+  "bundleId": "$bundle_id",
+  "mode": "attach"
+}
+EOF
+
+  echo ">> Bringing $bundle_id to foreground..." >&2
+  xcrun simctl launch "$udid" "$bundle_id" >/dev/null || true
+
+  claude_write_mcp_config .autobot/.mcp.json "$udid"
+  cp "$AUTOBOT_HOME/src/templates/critique-rubric.md" .autobot/critique-rubric.md
+  if [ ! -f .autobot/CLAUDE.md ]; then
+    sed "s/{{APP_NAME}}/$bundle_id/" \
+      "$AUTOBOT_HOME/src/templates/app-CLAUDE.md" > .autobot/CLAUDE.md
+  fi
+
+  local prompt; prompt=$(mktemp)
+  {
+    echo "# Run context"
+    echo
+    echo "- Run ID: \`$run_id\`"
+    echo "- Report dir: \`$report_dir\`"
+    echo "- Simulator UDID: \`$udid\`"
+    echo "- Bundle ID: \`$bundle_id\`"
+    echo "- Mode: attach (sim already booted, app already installed)"
+    echo
+    cat "$AUTOBOT_HOME/src/templates/discover-prompt.md"
+  } > "$prompt"
+
+  local composed; composed=$(claude_compose_prompt "$prompt")
+  echo ">> Starting discovery against running sim..." >&2
+  claude_run "$composed" "$(pwd)/.autobot/.mcp.json" "$(pwd)"
+  rm -f "$prompt" "$composed"
+
+  ln -snf "$run_id" .autobot/reports/latest
+  echo ">> Discovery complete. See .autobot/CLAUDE.md"
+}
+
+cmd_flow() {
+  local udid="${1:-}" bundle_id="${2:-}" flow_file="${3:-}"
+  if [ -z "$udid" ] || [ -z "$bundle_id" ] || [ -z "$flow_file" ]; then
+    echo "ERR: autobot flow <udid> <bundle-id> <flow-file.md>" >&2; exit 1
+  fi
+  if [ ! -f "$flow_file" ]; then
+    echo "ERR: flow file not found: $flow_file" >&2; exit 1
+  fi
+  flow_file="$(cd "$(dirname "$flow_file")" && pwd)/$(basename "$flow_file")"
+
+  local booted_list installed_apps
+  booted_list=$(xcrun simctl list devices booted 2>/dev/null || true)
+  if ! echo "$booted_list" | grep -q "$udid"; then
+    echo "ERR: simulator $udid is not booted." >&2; exit 1
+  fi
+  installed_apps=$(xcrun simctl listapps "$udid" 2>/dev/null || true)
+  if ! echo "$installed_apps" | grep -q "\"$bundle_id\""; then
+    echo "ERR: bundle $bundle_id is not installed on $udid." >&2; exit 1
+  fi
+
+  mkdir -p .autobot
+  local run_id; run_id="$(date +%Y-%m-%d-%H%M%S)"
+  local report_dir=".autobot/reports/$run_id"
+  mkdir -p "$report_dir"
+
+  cat > .autobot/config.json <<EOF
+{
+  "mode": "flow",
+  "udid": "$udid",
+  "bundleId": "$bundle_id",
+  "flowFile": "$flow_file"
+}
+EOF
+  cat > "$report_dir/run.json" <<EOF
+{
+  "udid": "$udid",
+  "bundleId": "$bundle_id",
+  "flowFile": "$flow_file",
+  "mode": "flow"
+}
+EOF
+
+  echo ">> Bringing $bundle_id to foreground..." >&2
+  xcrun simctl launch "$udid" "$bundle_id" >/dev/null || true
+
+  claude_write_mcp_config .autobot/.mcp.json "$udid"
+  cp "$AUTOBOT_HOME/src/templates/critique-rubric.md" .autobot/critique-rubric.md
+
+  # Counter file companion: if the flow references a counter, it lives next to the flow file.
+  local counter_file="${flow_file%.md}.counter"
+  if [ ! -f "$counter_file" ]; then
+    echo "1" > "$counter_file"
+  fi
+
+  local prompt; prompt=$(mktemp)
+  {
+    echo "# Run context"
+    echo
+    echo "- Run ID: \`$run_id\`"
+    echo "- Report dir: \`$report_dir\`"
+    echo "- Simulator UDID: \`$udid\`"
+    echo "- Bundle ID: \`$bundle_id\`"
+    echo "- Flow file: \`$flow_file\`"
+    echo "- Counter file: \`$counter_file\` (read current value, increment after use)"
+    echo "- Critique rubric: \`.autobot/critique-rubric.md\`"
+    echo "- Mode: flow (custom test plan)"
+    echo
+    cat "$AUTOBOT_HOME/src/templates/flow-prompt.md"
+  } > "$prompt"
+
+  local composed; composed=$(claude_compose_prompt "$prompt")
+  echo ">> Executing flow: $(basename "$flow_file")" >&2
+  claude_run "$composed" "$(pwd)/.autobot/.mcp.json" "$(pwd)"
+  rm -f "$prompt" "$composed"
+
+  ln -snf "$run_id" .autobot/reports/latest
+  echo ">> Done. Report: $report_dir/report.html"
+}
+
+cmd_run() {
+  if [ ! -f .autobot/config.json ]; then
+    echo "ERR: no .autobot/config.json — run \`autobot init <app-path>\` first." >&2
+    exit 1
+  fi
+  local app_path; app_path=$(/usr/bin/python3 -c "import json; print(json.load(open('.autobot/config.json'))['appInput'])")
+
+  local run_id; run_id="$(date +%Y-%m-%d-%H%M%S)"
+  local report_dir=".autobot/reports/$run_id"
+
+  local udid; udid=$(prepare_app "$app_path" "$report_dir")
+  claude_write_mcp_config .autobot/.mcp.json "$udid"
+
+  local prompt; prompt=$(mktemp)
+  {
+    echo "# Run context"
+    echo
+    echo "- Run ID: \`$run_id\`"
+    echo "- Report dir: \`$report_dir\`"
+    echo "- Simulator UDID: \`$udid\`"
+    echo "- App: \`$app_path\`"
+    echo "- Flow definitions: \`.autobot/CLAUDE.md\`"
+    echo "- Critique rubric: \`.autobot/critique-rubric.md\`"
+    echo
+    cat "$AUTOBOT_HOME/src/templates/run-prompt.md"
+  } > "$prompt"
+
+  local composed; composed=$(claude_compose_prompt "$prompt")
+  echo ">> Starting run (drive → critique → report)..." >&2
+  claude_run "$composed" "$(pwd)/.autobot/.mcp.json" "$(pwd)"
+  rm -f "$prompt" "$composed"
+
+  ln -snf "$run_id" .autobot/reports/latest
+  echo ">> Done. Report: $report_dir/report.html"
+}
+
+cmd_wizard() {
+  mkdir -p .autobot
+  local result udid bundle_id
+  result=$(wizard_run "$(pwd)")
+  udid="${result%%|*}"
+  bundle_id="${result##*|}"
+
+  # Offer to run immediately.
+  printf "Run the flow now? [Y/n]: " >&2
+  local answer; read -r answer </dev/tty
+  case "${answer:-y}" in
+    y|Y|yes|"") cmd_go ;;
+    *) echo "Skipped. Run later with: autobot go" >&2 ;;
+  esac
+}
+
+cmd_go() {
+  if [ ! -f .autobot/config.json ]; then
+    echo "ERR: no .autobot/config.json — run \`autobot wizard\` first." >&2; exit 1
+  fi
+  local udid bundle_id flow_file
+  udid=$(/usr/bin/python3 -c "import json; print(json.load(open('.autobot/config.json')).get('udid',''))")
+  bundle_id=$(/usr/bin/python3 -c "import json; print(json.load(open('.autobot/config.json')).get('bundleId',''))")
+  flow_file=$(/usr/bin/python3 -c "import json; print(json.load(open('.autobot/config.json')).get('mainFlow','.autobot/flows/main.md'))")
+
+  if [ -z "$udid" ] || [ -z "$bundle_id" ] || [ ! -f "$flow_file" ]; then
+    echo "ERR: config.json missing udid/bundleId or flow file not found." >&2; exit 1
+  fi
+
+  # Ensure sim is still booted (user might have shut it down).
+  local booted_list; booted_list=$(xcrun simctl list devices booted 2>/dev/null || true)
+  if ! echo "$booted_list" | grep -q "$udid"; then
+    echo "Sim $udid not booted — booting now..." >&2
+    xcrun simctl boot "$udid" 2>/dev/null || true
+    xcrun simctl bootstatus "$udid" -b >/dev/null
+    open -a Simulator --args -CurrentDeviceUDID "$udid" 2>/dev/null || true
+  fi
+
+  notify "autobot" "Starting flow for $bundle_id…"
+  cmd_flow "$udid" "$bundle_id" "$flow_file"
+
+  # Summarize from the latest report, notify, open the HTML.
+  local report=".autobot/reports/latest/report.html"
+  local summary
+  summary=$(/usr/bin/python3 - <<'PY' 2>/dev/null || echo "see report.html"
+import glob, json, os
+runs = sorted(glob.glob('.autobot/reports/*/critique.jsonl'))
+if not runs:
+    print("done — no critique file"); raise SystemExit
+last = runs[-1]
+counts = {'pass': 0, 'warn': 0, 'fail': 0}
+with open(last) as f:
+    for line in f:
+        line = line.strip()
+        if not line: continue
+        try:
+            v = json.loads(line).get('verdict', 'pass')
+            counts[v] = counts.get(v, 0) + 1
+        except Exception:
+            pass
+print(f"{counts.get('pass',0)} pass / {counts.get('warn',0)} warn / {counts.get('fail',0)} fail")
+PY
+)
+  notify "autobot — done" "$summary" "Glass"
+  if [ -e "$report" ]; then
+    notify_open "$report"
+  fi
+  echo ">> $summary" >&2
+}
+
+main() {
+  local sub="${1:-help}"; shift || true
+  case "$sub" in
+    wizard) cmd_wizard ;;
+    go)     cmd_go ;;
+    init)   cmd_init "$@" ;;
+    attach) cmd_attach "$@" ;;
+    flow)   cmd_flow "$@" ;;
+    run)    cmd_run "$@" ;;
+    speak)  cmd_speak "$@" ;;
+    tts)    cmd_tts "$@" ;;
+    setup-audio) cmd_setup_audio ;;
+    install) cmd_install ;;
+    doctor) cmd_doctor ;;
+    help|-h|--help) usage ;;
+    *) echo "Unknown subcommand: $sub" >&2; usage; exit 1 ;;
+  esac
+}
+
+main "$@"
