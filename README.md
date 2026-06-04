@@ -1,8 +1,16 @@
-# autobot
+# autobot - find bugs in your IOS App + test it for you
 
 Visual-first iOS QA driven by Claude Code + mobile-mcp.
 
 Point it at an iOS app, it discovers the key flows, runs them on the simulator, screenshots every step, and produces an HTML report that flags anything a common-sense user would side-eye (truncated text, misaligned elements, ugly empty states, confusing copy, broken layouts).
+
+## Installation
+
+Run this in a terminal:
+`curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/install.sh | bash`
+
+Then open Claude Code:
+`test my ios app using autbot skill'
 
 ## Status
 
