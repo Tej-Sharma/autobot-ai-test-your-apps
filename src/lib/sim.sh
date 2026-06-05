@@ -60,7 +60,7 @@ sim_boot() {
   local udid="$1"
   local state
   state=$(xcrun simctl list devices --json \
-    | /usr/bin/python3 -c "
+    | AUTOBOT_UDID="$udid" /usr/bin/python3 -c "
 import json, sys, os
 udid = os.environ['AUTOBOT_UDID']
 data = json.load(sys.stdin)
@@ -69,7 +69,7 @@ for runtime, devices in data['devices'].items():
         if d['udid'] == udid:
             print(d['state']); sys.exit(0)
 print('Unknown')
-" AUTOBOT_UDID="$udid" 2>/dev/null || echo Unknown)
+" 2>/dev/null || echo Unknown)
   if [ "$state" != "Booted" ]; then
     xcrun simctl boot "$udid"
   fi

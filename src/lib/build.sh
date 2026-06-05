@@ -51,14 +51,20 @@ build_for_simulator() {
   esac
 
   mkdir -p "$derived"
-  xcodebuild \
+  # Send xcodebuild's own output to stderr so it can't pollute this function's
+  # stdout (which must be ONLY the resolved .app path). Abort on a failed build
+  # instead of falling through to install a bogus path.
+  if ! xcodebuild \
     "$flag" "$path" \
     -scheme "$scheme" \
     -configuration Debug \
     -destination "platform=iOS Simulator,id=$udid" \
     -derivedDataPath "$derived" \
     -quiet \
-    build
+    build >&2; then
+    echo "ERR: xcodebuild failed for scheme '$scheme' (see build log above)" >&2
+    exit 1
+  fi
 
   # Find the most recent .app under Build/Products/Debug-iphonesimulator/
   local app

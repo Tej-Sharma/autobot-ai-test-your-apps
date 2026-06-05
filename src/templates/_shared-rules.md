@@ -2,6 +2,29 @@
 
 These rules apply to discovery, flow execution, and run passes alike. They override any contradictory instinct.
 
+## WebDriverAgent startup — wait, don't loop
+
+The simulator is driven through **WebDriverAgent (WDA)**. On a fresh simulator the
+**first** interactive call (`mobile_take_screenshot`, `mobile_list_elements_on_screen`,
+taps, typing) can fail while WDA cold-starts — you'll see errors like
+`timed out waiting for WebDriverAgent to be ready` or a connection refusal. This is
+normal startup, **not** a sign the app crashed or that you left the app.
+
+When you hit a WDA/connection error:
+
+1. **Do NOT relaunch the app.** Relaunching does not start WDA any faster, and the
+   open→exit→reopen cycle is the single worst-looking failure mode for the user.
+2. **Wait, then retry the _same_ call.** Run `sleep 8` via Bash, then re-issue the
+   exact tool call that failed. Repeat up to ~10 times (≈90s total). WDA cold-start
+   can legitimately take 1–2 minutes the first time.
+3. `mobile_save_screenshot` uses `simctl` and works **without** WDA — you may use it
+   to confirm the app is still on screen while you wait. Seeing the app there is
+   expected; keep waiting for WDA, don't relaunch.
+4. These WDA-warmup retries **do not count** against the per-step tool-call budget.
+
+Only once a WDA-backed call (e.g. `mobile_take_screenshot` or
+`mobile_list_elements_on_screen`) succeeds should you begin executing flow steps.
+
 ## Speed — don't burn turns
 
 - **Use `mobile_take_screenshot`, not `mobile_save_screenshot` + `Read`.** `take_screenshot` returns the image inline. Only use `save_screenshot` when you specifically want to archive a frame for the final report.

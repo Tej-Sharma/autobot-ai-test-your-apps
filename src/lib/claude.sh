@@ -42,6 +42,70 @@ claude_compose_prompt() {
   echo "$out"
 }
 
+# Locate the `mobilecli` binary that mobile-mcp drives the simulator through.
+# Prefers the copy already in the npx cache (so we match mobile-mcp's version);
+# falls back to fetching it via npx on a fresh machine. Echoes a runnable command,
+# or empty string if neither is available.
+claude_mobilecli_cmd() {
+  local bin
+  case "$(uname -m)" in
+    arm64) bin="mobilecli-darwin-arm64" ;;
+    *)     bin="mobilecli-darwin-amd64" ;;
+  esac
+  local found
+  found=$(find "$HOME/.npm/_npx" -name "$bin" -type f 2>/dev/null | head -1)
+  if [ -n "$found" ]; then
+    echo "$found"
+  elif command -v npx >/dev/null 2>&1; then
+    echo "npx -y mobilecli@latest"
+  else
+    echo ""
+  fi
+}
+
+# Pre-warm WebDriverAgent before the drive pass. The first interactive call on a
+# fresh simulator triggers a WDA build/install that can take 1–2 min; if that
+# happens mid-drive, the agent sees "timed out waiting for WebDriverAgent" and can
+# fall into an app open→exit→reopen recovery loop that looks broken to the user.
+# Paying that cost here (with a clear message) keeps the drive pass clean.
+# Best-effort: any failure just falls through — the prompt also has a wait-and-retry
+# rule as a safety net. Set AUTOBOT_SKIP_WDA_PREWARM=1 to skip.
+# Args: <mcp-config-path>
+claude_prewarm_wda() {
+  local mcp_config="$1"
+  [ -n "${AUTOBOT_SKIP_WDA_PREWARM:-}" ] && return 0
+
+  local udid
+  udid=$(/usr/bin/python3 -c "
+import json, sys
+try:
+    cfg = json.load(open(sys.argv[1]))
+    print(cfg['mcpServers']['mobile-mcp']['env']['DEVICE_UDID'])
+except Exception:
+    pass
+" "$mcp_config" 2>/dev/null || true)
+  [ -z "$udid" ] && return 0
+
+  local mc; mc=$(claude_mobilecli_cmd)
+  [ -z "$mc" ] && return 0
+
+  echo ">> Warming up WebDriverAgent on the simulator (first run can take 1–2 min)..." >&2
+  # Install the on-device agent (idempotent / fast once present).
+  $mc agent install --device "$udid" >/dev/null 2>&1 || true
+
+  # Poll until WDA actually answers, so the drive agent never races the cold start.
+  local deadline=$(( $(date +%s) + 180 ))
+  while [ "$(date +%s)" -lt "$deadline" ]; do
+    if $mc device info --device "$udid" >/dev/null 2>&1; then
+      echo ">> WebDriverAgent ready." >&2
+      return 0
+    fi
+    sleep 3
+  done
+  echo "   (WDA not confirmed ready after 180s — continuing; the drive agent will keep retrying)" >&2
+  return 0
+}
+
 # Run claude with a prompt file, the MCP config, and tool allowlist.
 # Args: <prompt-file> <mcp-config> <work-dir>
 claude_run() {
@@ -70,6 +134,10 @@ claude_run() {
   else
     timeout_cmd=(perl -e 'alarm shift; exec @ARGV' "$timeout_s")
   fi
+
+  # Get WebDriverAgent up before the drive agent starts, so it doesn't hit a
+  # cold-start timeout loop on its first interactive call.
+  claude_prewarm_wda "$mcp_config"
 
   (
     cd "$work_dir"
