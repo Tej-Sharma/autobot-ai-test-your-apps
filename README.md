@@ -4,13 +4,30 @@ Visual-first iOS QA driven by Claude Code + mobile-mcp.
 
 Point it at an iOS app, it discovers the key flows, runs them on the simulator, screenshots every step, and produces an HTML report that flags anything a common-sense user would side-eye (truncated text, misaligned elements, ugly empty states, confusing copy, broken layouts).
 
+This repo ships **two testers** that share the same philosophy (the CLI is plumbing; Claude does the thinking), each with its own one-line installer:
+
+| Tester | Tests | Drives via | Lives in | CLI |
+|---|---|---|---|---|
+| **autobot** | iOS apps | mobile-mcp → iOS Simulator | repo root | `autobot` |
+| **webbot** | web apps | Playwright MCP → Chromium | [`web/`](web/) | `webbot` |
+
 ## Installation
 
-Run this in a terminal:
-`curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/install.sh | bash`
+**iOS tester (autobot)** — run in a terminal:
+```
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/install.sh | bash
+```
+
+**Web tester (webbot)** — run in a terminal:
+```
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/web/install.sh | bash
+```
+
+The two installers are independent — install either or both. autobot clones into `~/.autobot`; webbot clones into `~/.webbot` and runs out of this repo's `web/` subfolder. See [`web/README.md`](web/README.md) for webbot details.
 
 Then open Claude Code:
-`test my ios app using autbot skill'
+- `test my ios app using the autobot skill`
+- `test my web app using the webbot skill`
 
 ## Status
 
@@ -80,12 +97,17 @@ open ./.autobot/reports/latest/report.html
 
 ```
 ios-tester/
-├── bin/autobot              ← CLI entry (bash)
+├── bin/autobot              ← iOS CLI entry (bash)
 ├── src/
 │   ├── lib/                  ← simctl, xcodebuild, claude spawn helpers
 │   └── templates/            ← prompt + config templates
 ├── tasks/                    ← todo.md, lessons.md
-└── examples/                 ← sample .autobot/ outputs
+├── examples/                 ← sample .autobot/ outputs
+├── install.sh               ← iOS tester installer (curl target)
+└── web/                     ← webbot: the web-app tester (self-contained)
+    ├── bin/webbot            ← web CLI entry (bash)
+    ├── src/{lib,templates}   ← Playwright MCP plumbing + prompts
+    └── install.sh            ← web tester installer (separate curl target)
 ```
 
 In a target app's repo, `autobot init` creates:

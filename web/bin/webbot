@@ -1,0 +1,262 @@
+#!/usr/bin/env bash
+# webbot — visual web-app QA driven by Claude Code + Playwright MCP.
+#
+# Subcommands:
+#   install                     One-shot install of all deps + PATH symlink
+#   init <url-or-project-dir>   Configure the target app, run flow discovery
+#   auth                        Capture login state into .webbot/storage-state.json
+#   run                         Re-run discovered flows + critique + HTML report
+#   go                          Alias for run (+ notification + open report)
+#   flow <flow-file.md>         Execute a user-authored test plan
+#   doctor                      Verify environment
+#   help                        Show this
+#
+# Run from inside the target app's repo (or any dir for a deployed URL). webbot
+# writes its state under `./.webbot/`.
+
+set -euo pipefail
+
+# Resolve this script's real path, following symlinks (e.g. /usr/local/bin/webbot
+# → ~/.webbot/web/bin/webbot), so WEBBOT_HOME points at the real checkout. macOS
+# bash 3.2 has no `readlink -f`, so walk the symlink chain by hand.
+_webbot_src="${BASH_SOURCE[0]}"
+while [ -h "$_webbot_src" ]; do
+  _webbot_dir="$(cd -P "$(dirname "$_webbot_src")" && pwd)"
+  _webbot_src="$(readlink "$_webbot_src")"
+  [ "${_webbot_src#/}" = "$_webbot_src" ] && _webbot_src="$_webbot_dir/$_webbot_src"
+done
+WEBBOT_HOME="$(cd -P "$(dirname "$_webbot_src")/.." && pwd)"
+unset _webbot_src _webbot_dir
+source "$WEBBOT_HOME/src/lib/app.sh"
+source "$WEBBOT_HOME/src/lib/browser.sh"
+source "$WEBBOT_HOME/src/lib/claude.sh"
+source "$WEBBOT_HOME/src/lib/notify.sh"
+source "$WEBBOT_HOME/src/lib/install.sh"
+
+WEBBOT_DIR="$PWD/.webbot"
+CONFIG_FILE="$WEBBOT_DIR/config.json"
+
+usage() {
+  cat <<EOF
+webbot — visual web-app QA driven by Claude Code + Playwright MCP
+
+Usage:
+  webbot install                     One-shot install of all deps
+  webbot init <url-or-project-dir>   Configure target + discover flows
+  webbot auth                        Capture login state (manual login, saved for runs)
+  webbot run                         Re-run discovered flows + report
+  webbot go                          run + notification + open report
+  webbot flow <flow-file.md>         Execute a custom test plan
+  webbot doctor                      Verify environment
+  webbot help
+
+<url-or-project-dir> may be:
+  https://staging.myapp.com          (deployed app)
+  http://localhost:3000              (already-running dev server)
+  /path/to/my-app                    (local project — dev server auto-started)
+
+Env:
+  WEBBOT_APP_URL          URL a local project serves on (default: http://localhost:3000)
+  WEBBOT_CLAUDE_MODEL     Claude model (default: claude-opus-4-8)
+  WEBBOT_HEADLESS=1       Run the browser headless
+  WEBBOT_TRACE=1          Enable devtools caps (Playwright tracing tools) for the agent
+  WEBBOT_TIMEOUT_SECONDS  Wall-clock kill for the agent (default: 900)
+  WEBBOT_MAX_BUDGET_USD   Spend cap for the agent (default: 3)
+EOF
+}
+
+# --- config helpers ---------------------------------------------------------
+
+config_get() {
+  local key="$1"
+  /usr/bin/python3 -c "
+import json, sys
+try:
+    print(json.load(open(sys.argv[1])).get(sys.argv[2], ''))
+except Exception:
+    pass
+" "$CONFIG_FILE" "$key" 2>/dev/null || true
+}
+
+config_require() {
+  if [ ! -f "$CONFIG_FILE" ]; then
+    echo "ERR: no $CONFIG_FILE — run 'webbot init <url-or-project-dir>' first." >&2
+    exit 1
+  fi
+}
+
+# --- pass runner -------------------------------------------------------------
+# Boots the app (if local), wires Playwright MCP, composes the prompt, spawns
+# claude, and refreshes the latest-report symlink.
+# Args: <pass-prompt-file> [flow-file]
+run_pass() {
+  local pass_prompt="$1" flow_file="${2:-}"
+
+  local app_url dev_command dev_dir storage_state
+  app_url=$(config_get app_url)
+  dev_command=$(config_get dev_command)
+  dev_dir=$(config_get dev_dir)
+  storage_state=$(config_get storage_state)
+  [ -n "$app_url" ] || { echo "ERR: app_url missing from $CONFIG_FILE" >&2; exit 1; }
+
+  local run_id run_dir
+  run_id=$(date +%Y-%m-%d-%H%M%S)
+  run_dir="$WEBBOT_DIR/reports/$run_id"
+  mkdir -p "$run_dir/screenshots"
+  # Pre-seed the journals so the agent's first append always works.
+  touch "$run_dir/journal.jsonl" "$run_dir/flaws.jsonl" "$run_dir/critique.jsonl"
+
+  trap app_stop EXIT
+  app_start "$dev_command" "$dev_dir" "$app_url" "$run_dir"
+
+  local mcp_config ctx prompt
+  mcp_config=$(mktemp -t webbot-mcp)
+  browser_write_mcp_config "$mcp_config" "$run_dir" "$storage_state"
+  ctx=$(mktemp -t webbot-ctx)
+  claude_write_run_context "$ctx" "$app_url" "$run_dir" "$WEBBOT_DIR" "$flow_file"
+  prompt=$(claude_compose_prompt "$pass_prompt" "$ctx")
+
+  echo ">> Spawning Claude (model: ${WEBBOT_CLAUDE_MODEL:-claude-opus-4-8}) — run dir: $run_dir" >&2
+  claude_run "$prompt" "$mcp_config" "$PWD" || true
+
+  rm -f "$prompt" "$ctx" "$mcp_config"
+  app_stop
+  trap - EXIT
+
+  # Playwright MCP sometimes resolves screenshot filenames against the process cwd
+  # instead of --output-dir. Sweep strays (only PNGs newer than this run) into the
+  # run's screenshots dir so journal references (screenshots/<name>) always resolve.
+  find "$PWD" -maxdepth 1 -name "*.png" -newer "$run_dir" \
+    -exec mv {} "$run_dir/screenshots/" \; 2>/dev/null || true
+
+  ln -sfn "$run_dir" "$WEBBOT_DIR/reports/latest"
+  LAST_RUN_DIR="$run_dir"
+}
+
+flaw_count() {
+  local f="$1"
+  [ -f "$f" ] && grep -c . "$f" 2>/dev/null || echo 0
+}
+
+# --- subcommands -------------------------------------------------------------
+
+cmd_init() {
+  local target="${1:-}"
+  [ -n "$target" ] || { echo "ERR: webbot init <url-or-project-dir>" >&2; exit 1; }
+
+  local app_url="" dev_command="" dev_dir=""
+  case "$target" in
+    http://*|https://*)
+      app_url="$target"
+      ;;
+    *)
+      [ -d "$target" ] || { echo "ERR: $target is neither a URL nor a directory" >&2; exit 1; }
+      dev_dir="$(cd "$target" && pwd)"
+      dev_command=$(app_detect_dev_command "$dev_dir")
+      app_url="${WEBBOT_APP_URL:-http://localhost:3000}"
+      if [ -z "$dev_command" ]; then
+        echo "WARN: couldn't detect a dev command in $dev_dir." >&2
+        echo "      Start the app yourself before runs, or add dev_command to $CONFIG_FILE." >&2
+      else
+        echo ">> Detected dev command: $dev_command (serving at $app_url — override with WEBBOT_APP_URL)" >&2
+      fi
+      ;;
+  esac
+
+  mkdir -p "$WEBBOT_DIR/reports"
+  cat > "$CONFIG_FILE" <<EOF
+{
+  "app_url": "$app_url",
+  "dev_command": "$dev_command",
+  "dev_dir": "$dev_dir",
+  "storage_state": ""
+}
+EOF
+  # Per-app rubric copy — users extend it; runs read this copy, not the template.
+  [ -f "$WEBBOT_DIR/critique-rubric.md" ] || cp "$WEBBOT_HOME/src/templates/critique-rubric.md" "$WEBBOT_DIR/critique-rubric.md"
+  # Empty state graph for discovery to fill.
+  [ -f "$WEBBOT_DIR/state-graph.json" ] || echo '{"nodes": [], "edges": []}' > "$WEBBOT_DIR/state-graph.json"
+
+  echo ">> Config written to $CONFIG_FILE — starting discovery." >&2
+  run_pass "$WEBBOT_HOME/src/templates/discover-prompt.md"
+  echo ""
+  echo ">> Discovery done. Review/edit the proposed flows in $WEBBOT_DIR/CLAUDE.md, then: webbot run"
+}
+
+cmd_auth() {
+  config_require
+  local app_url; app_url=$(config_get app_url)
+  browser_capture_auth "$app_url" "$WEBBOT_DIR/storage-state.json"
+  /usr/bin/python3 -c "
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg['storage_state'] = sys.argv[2]
+json.dump(cfg, open(sys.argv[1], 'w'), indent=2)
+" "$CONFIG_FILE" "$WEBBOT_DIR/storage-state.json"
+}
+
+cmd_run() {
+  config_require
+  if [ ! -f "$WEBBOT_DIR/CLAUDE.md" ]; then
+    echo "ERR: no $WEBBOT_DIR/CLAUDE.md (no discovered flows) — run 'webbot init' first." >&2
+    exit 1
+  fi
+  run_pass "$WEBBOT_HOME/src/templates/run-prompt.md"
+  local flaws; flaws=$(flaw_count "$LAST_RUN_DIR/flaws.jsonl")
+  notify_user "webbot" "Run complete — $flaws flaw(s) recorded"
+  notify_open_report "$LAST_RUN_DIR/report.html"
+  echo ">> Report: $LAST_RUN_DIR/report.html"
+}
+
+cmd_flow() {
+  config_require
+  local flow_file="${1:-}"
+  [ -f "$flow_file" ] || { echo "ERR: webbot flow <flow-file.md>" >&2; exit 1; }
+  flow_file="$(cd "$(dirname "$flow_file")" && pwd)/$(basename "$flow_file")"
+  run_pass "$WEBBOT_HOME/src/templates/flow-prompt.md" "$flow_file"
+  local flaws; flaws=$(flaw_count "$LAST_RUN_DIR/flaws.jsonl")
+  notify_user "webbot" "Flow complete — $flaws flaw(s) recorded"
+  notify_open_report "$LAST_RUN_DIR/report.html"
+  echo ">> Report: $LAST_RUN_DIR/report.html"
+}
+
+cmd_doctor() {
+  local ok=1
+  for bin in node npx claude curl /usr/bin/python3; do
+    if command -v "$bin" >/dev/null 2>&1; then
+      echo "ok   $bin"
+    else
+      echo "MISS $bin"; ok=0
+    fi
+  done
+  if npx -y playwright --version >/dev/null 2>&1; then
+    echo "ok   playwright"
+  else
+    echo "MISS playwright — run: webbot install"; ok=0
+  fi
+  if [ -f "$CONFIG_FILE" ]; then
+    echo "ok   $CONFIG_FILE (app: $(config_get app_url))"
+    local ss; ss=$(config_get storage_state)
+    if [ -n "$ss" ] && [ -f "$ss" ]; then
+      echo "ok   auth storage-state"
+    else
+      echo "note no auth captured — 'webbot auth' if the app needs login"
+    fi
+  else
+    echo "note not initialized here — 'webbot init <url-or-project-dir>'"
+  fi
+  [ "$ok" = 1 ] && echo "all good." || { echo "missing tools above."; exit 1; }
+}
+
+# --- dispatch ----------------------------------------------------------------
+
+case "${1:-help}" in
+  install) install_all "$WEBBOT_HOME" ;;
+  init)    shift; cmd_init "$@" ;;
+  auth)    cmd_auth ;;
+  run|go)  cmd_run ;;
+  flow)    shift; cmd_flow "$@" ;;
+  doctor)  cmd_doctor ;;
+  help|-h|--help) usage ;;
+  *) echo "ERR: unknown subcommand '$1'" >&2; usage; exit 1 ;;
+esac

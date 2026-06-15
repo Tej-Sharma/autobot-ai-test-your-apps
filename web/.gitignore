@@ -1,0 +1,6 @@
+.DS_Store
+node_modules/
+*.log
+
+# per-target state lands in the target repo, but just in case someone inits here
+.webbot/
