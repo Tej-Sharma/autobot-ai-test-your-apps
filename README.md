@@ -1,4 +1,4 @@
-# autobot - automatically test your Web + Mobile Apps with AI
+# autobot - automatically test your web + mobile apps
 
 Free visual-first iOS QA driven by Claude Code + mobile-mcp
 
