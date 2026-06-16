@@ -1,15 +1,9 @@
-# autobot - find bugs in your IOS App + test it for you
+# autobot - automatically test your Web + Mobile Apps with AI
 
-Visual-first iOS QA driven by Claude Code + mobile-mcp.
+Free visual-first iOS QA driven by Claude Code + mobile-mcp
 
-Point it at an iOS app, it discovers the key flows, runs them on the simulator, screenshots every step, and produces an HTML report that flags anything a common-sense user would side-eye (truncated text, misaligned elements, ugly empty states, confusing copy, broken layouts).
+Just plug it in your existing Claude Code, and AutoBot has a memory system + testing flows understanding of your app to test through it.
 
-This repo ships **two testers** that share the same philosophy (the CLI is plumbing; Claude does the thinking), each with its own one-line installer:
-
-| Tester | Tests | Drives via | Lives in | CLI |
-|---|---|---|---|---|
-| **autobot** | iOS apps | mobile-mcp → iOS Simulator | repo root | `autobot` |
-| **webbot** | web apps | Playwright MCP → Chromium | [`web/`](web/) | `webbot` |
 
 ## Installation
 
@@ -23,11 +17,15 @@ curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/devel
 curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/web/install.sh | bash
 ```
 
-The two installers are independent — install either or both. autobot clones into `~/.autobot`; webbot clones into `~/.webbot` and runs out of this repo's `web/` subfolder. See [`web/README.md`](web/README.md) for webbot details.
-
-Then open Claude Code:
+Then open Claude Code and give it the location of your projects:
 - `test my ios app using the autobot skill`
 - `test my web app using the webbot skill`
+
+## Easy to Setup, 24/7 Testing Your Products
+
+This is if you want a cloud-hosted tester that is always testing your web and mobile apps to ensure no frontend UI bug or backend error exists. 
+
+📦 [Get It Here](https://autobot.it.com/)
 
 ## Status
 
