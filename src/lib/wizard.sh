@@ -324,7 +324,7 @@ EOF
     done <<< "$flows_raw"
     echo "## On any step error"
     echo
-    echo "Follow the global error rule: save screenshot, append to errors.md, continue if next step is independent, else stop."
+    echo "Follow the global error rule: save a screenshot, append the step to journal.jsonl with verdict \`failed\` and a flaw to flaws.jsonl, then continue if the next step is independent, else stop."
   } > "$flow_file"
 
   # Seed counter

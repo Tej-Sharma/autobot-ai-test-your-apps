@@ -208,7 +208,10 @@ When the user asks for visual UI testing of an iOS app, run autobot.
 
 - Read the summary that autobot prints (pass/warn/fail counts).
 - The report HTML is at \`.autobot/reports/latest/report.html\` — autobot auto-opens it.
-- If any steps failed, surface the error one-liners from \`.autobot/reports/latest/errors.md\`.
+- For specifics, the journals are machine-readable:
+  - \`.autobot/reports/latest/flaws.jsonl\` — every flaw with severity + screenshot refs
+  - \`.autobot/reports/latest/journal.jsonl\` — the full step trace
+- Surface the top high-severity flaws to the user (one line each, with the screenshot filename).
 
 ## Voice / audio testing
 

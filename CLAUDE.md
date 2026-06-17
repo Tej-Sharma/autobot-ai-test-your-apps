@@ -70,13 +70,37 @@ For higher-quality voices: macOS Settings → Accessibility → Spoken Content �
 - `src/templates/critique-rubric.md` — UX checklist used by critique pass
 - `src/templates/app-CLAUDE.md` — template written into `<target>/.autobot/CLAUDE.md` after discovery
 
+## The journal-based memory system
+
+The drive agent does **not** rely on long context — every bit of run state is
+externalized to disk incrementally, so a killed run still has a complete record up to
+its last step. Three artifacts (ported from the sibling `web/` tester, adapted for iOS):
+
+- `reports/<run>/journal.jsonl` — the step trace: goal, action, `screen_before`/
+  `screen_after`, screenshot ref, `crashed` flag, verdict. One line per step.
+- `reports/<run>/flaws.jsonl` — every flaw/crash/error with severity and **references
+  to the saved screenshots that show it**. The HTML report is built from this file.
+- `.autobot/state-graph.json` — the screen-coverage map, **persisted across runs**:
+  named screen nodes (with a recognizable `signature` + a `reach` tap-path) marked
+  explored/partial/unexplored, plus action edges. Discovery and the exploratory pass
+  use it to know what they haven't seen yet.
+
+iOS-specific adaptation vs. the web tester: web screens are URL-addressable, so
+backtracking there is one `navigate` call. iOS screens are not — backtracking is
+`mobile_launch_app` + re-walking a node's `reach` path (or a known deep-link URL
+scheme). And mobile-mcp exposes no console/network, so the web's per-step
+console/network check becomes **crash + visible-error detection**. The CLI seeds these
+files per run via `claude_seed_run_dir` and points the agent at them via
+`claude_run_context_paths` (both in `src/lib/claude.sh`).
+
 ## Conventions
 
 - Bash with `set -euo pipefail`
 - All paths absolute when crossing process boundaries
-- Screenshots: PNG, named `NN_<action-slug>.png` in flow-specific dirs
+- Screenshots: PNG, saved flat in the run's `screenshots/` dir as `<flow-slug>__NN_<action-slug>.png`; referenced in journals as `screenshots/<name>`
 - Flow definitions: prose paragraphs inside the target's `.autobot/CLAUDE.md` — not YAML, because Claude reads natural language better than it parses structured DSLs
 - Critique rubric: editable markdown — users can extend it per-app
+- Journals: append-only JSONL, written as the run happens (never batched at the end)
 
 ## What Claude should NOT do here
 

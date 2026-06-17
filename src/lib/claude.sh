@@ -42,6 +42,33 @@ claude_compose_prompt() {
   echo "$out"
 }
 
+# Seed the journal-based memory for a run. Creates the run's screenshots/ dir,
+# pre-touches the three per-run journals so the agent's first append never fails on a
+# missing file, and seeds the cross-run state-graph (the screen-coverage map) if it
+# doesn't exist yet. Called from the target repo's cwd, so .autobot is relative.
+# Args: <report-dir>
+claude_seed_run_dir() {
+  local report_dir="$1"
+  mkdir -p "$report_dir/screenshots"
+  touch "$report_dir/journal.jsonl" "$report_dir/flaws.jsonl" "$report_dir/critique.jsonl"
+  [ -f .autobot/state-graph.json ] || echo '{"nodes": [], "edges": []}' > .autobot/state-graph.json
+}
+
+# Echo the run-context bullets shared by every pass: where the journals, screenshots,
+# and the persisted state graph live. All paths relative to the target repo cwd (which
+# is where the spawned claude runs), matching how the agent references them.
+# Args: <report-dir>
+claude_run_context_paths() {
+  local report_dir="$1"
+  cat <<EOF
+- Journal (step trace — append one JSON line per step): \`$report_dir/journal.jsonl\`
+- Flaws journal (append the moment you notice a flaw): \`$report_dir/flaws.jsonl\`
+- Critique verdicts (one line per screenshot, written in the critique pass): \`$report_dir/critique.jsonl\`
+- Screenshots dir (save PNGs here as \`<flow-slug>__NN_<action>.png\`; reference them in journals as \`screenshots/<name>\`): \`$report_dir/screenshots/\`
+- State graph (the screen-coverage map; PERSISTS across runs): \`.autobot/state-graph.json\`
+EOF
+}
+
 # Locate the `mobilecli` binary that mobile-mcp drives the simulator through.
 # Prefers the copy already in the npx cache (so we match mobile-mcp's version);
 # falls back to fetching it via npx on a fresh machine. Echoes a runnable command,

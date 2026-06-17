@@ -207,6 +207,9 @@ EOF
       "$AUTOBOT_HOME/src/templates/app-CLAUDE.md" > .autobot/CLAUDE.md
   fi
 
+  # Seed the journal-based memory (screenshots dir, journals, state graph).
+  claude_seed_run_dir "$report_dir"
+
   # Build the discovery prompt with run-specific context.
   local prompt; prompt=$(mktemp)
   {
@@ -216,6 +219,11 @@ EOF
     echo "- Report dir: \`$report_dir\`"
     echo "- Simulator UDID: \`$udid\`"
     echo "- App: \`$app_path\`"
+    echo "- Bundle ID: \`$(/usr/bin/python3 -c "import json; print(json.load(open('$report_dir/run.json'))['bundleId'])")\`"
+    claude_run_context_paths "$report_dir"
+    echo "- Flow definitions to write: \`.autobot/CLAUDE.md\`"
+    echo "- Critique rubric: \`.autobot/critique-rubric.md\`"
+    echo "- Latest-report symlink to refresh: \`.autobot/reports/latest\` -> \`$run_id\`"
     echo
     cat "$AUTOBOT_HOME/src/templates/discover-prompt.md"
   } > "$prompt"
@@ -280,6 +288,8 @@ EOF
       "$AUTOBOT_HOME/src/templates/app-CLAUDE.md" > .autobot/CLAUDE.md
   fi
 
+  claude_seed_run_dir "$report_dir"
+
   local prompt; prompt=$(mktemp)
   {
     echo "# Run context"
@@ -289,6 +299,10 @@ EOF
     echo "- Simulator UDID: \`$udid\`"
     echo "- Bundle ID: \`$bundle_id\`"
     echo "- Mode: attach (sim already booted, app already installed)"
+    claude_run_context_paths "$report_dir"
+    echo "- Flow definitions to write: \`.autobot/CLAUDE.md\`"
+    echo "- Critique rubric: \`.autobot/critique-rubric.md\`"
+    echo "- Latest-report symlink to refresh: \`.autobot/reports/latest\` -> \`$run_id\`"
     echo
     cat "$AUTOBOT_HOME/src/templates/discover-prompt.md"
   } > "$prompt"
@@ -356,6 +370,8 @@ EOF
     echo "1" > "$counter_file"
   fi
 
+  claude_seed_run_dir "$report_dir"
+
   local prompt; prompt=$(mktemp)
   {
     echo "# Run context"
@@ -364,9 +380,11 @@ EOF
     echo "- Report dir: \`$report_dir\`"
     echo "- Simulator UDID: \`$udid\`"
     echo "- Bundle ID: \`$bundle_id\`"
-    echo "- Flow file: \`$flow_file\`"
+    echo "- Flow file (the test plan to execute): \`$flow_file\`"
     echo "- Counter file: \`$counter_file\` (read current value, increment after use)"
+    claude_run_context_paths "$report_dir"
     echo "- Critique rubric: \`.autobot/critique-rubric.md\`"
+    echo "- Latest-report symlink to refresh: \`.autobot/reports/latest\` -> \`$run_id\`"
     echo "- Mode: flow (custom test plan)"
     echo
     cat "$AUTOBOT_HOME/src/templates/flow-prompt.md"
@@ -393,6 +411,7 @@ cmd_run() {
 
   local udid; udid=$(prepare_app "$app_path" "$report_dir")
   claude_write_mcp_config .autobot/.mcp.json "$udid"
+  claude_seed_run_dir "$report_dir"
 
   local prompt; prompt=$(mktemp)
   {
@@ -402,8 +421,11 @@ cmd_run() {
     echo "- Report dir: \`$report_dir\`"
     echo "- Simulator UDID: \`$udid\`"
     echo "- App: \`$app_path\`"
+    echo "- Bundle ID: \`$(/usr/bin/python3 -c "import json; print(json.load(open('$report_dir/run.json'))['bundleId'])")\`"
     echo "- Flow definitions: \`.autobot/CLAUDE.md\`"
     echo "- Critique rubric: \`.autobot/critique-rubric.md\`"
+    claude_run_context_paths "$report_dir"
+    echo "- Latest-report symlink to refresh: \`.autobot/reports/latest\` -> \`$run_id\`"
     echo
     cat "$AUTOBOT_HOME/src/templates/run-prompt.md"
   } > "$prompt"

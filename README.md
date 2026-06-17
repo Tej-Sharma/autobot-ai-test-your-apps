@@ -50,10 +50,37 @@ v1 prototype. Single-machine, simulator-only, one app per project directory.
 
 Two passes per run:
 
-1. **Drive** — Claude executes each flow step-by-step via mobile-mcp, taking a screenshot after every action.
-2. **Critique** — Each screenshot is re-fed to Claude with a UX rubric. Issues get annotated. Clean shots get a green check.
+1. **Drive** — Claude executes each flow step-by-step via mobile-mcp, journaling every step and screenshotting every new screen and significant state change.
+2. **Critique** — Each saved screenshot is re-fed to Claude with a UX rubric, plus a cross-screen consistency check (fonts/colors/components drifting between screens). Issues become flaws; clean shots get a green check.
 
-The split matters: driving is expensive and stateful; critique is cheap, stateless, and parallelizable. Re-run critique with a different rubric without re-driving.
+The split matters: driving is expensive and stateful; critique is cheap, stateless, and re-runnable with a different rubric without re-driving.
+
+## The memory system: journals + a coverage map, written as the run happens
+
+autobot deliberately does **not** rely on long context. Everything is externalized to
+disk, incrementally — kill the run at any point and the record is complete up to the
+last step. (This is the same journal-based system the sibling [webbot](web/) uses,
+adapted for iOS.)
+
+- **`journal.jsonl`** — the step trace: goal, action, screen before/after, screenshot
+  ref, a `crashed` flag, and a verdict. One line per step, appended as it happens.
+- **`flaws.jsonl`** — the flaws/errors journal: every visual flaw, broken behavior,
+  crash, or stuck state, with severity and **references to the saved screenshots that
+  show it**. This is what the HTML report is built from.
+- **`state-graph.json`** — the app map (persists across runs): named screen nodes
+  marked explored/partial/unexplored, with a recognizable *signature* and a *reach*
+  tap-path each, plus action edges. Discovery and the exploratory pass always know
+  what they haven't seen yet.
+
+**iOS vs. web, honestly:** web screens are URL-addressable, so on webbot backtracking
+to any prior state is a single `navigate` call and console/network errors are free
+evidence after every step. iOS has neither. So on autobot:
+
+- **Backtracking** = relaunch the app and re-walk a screen's stored `reach` path (or a
+  known deep-link URL scheme) — the state graph stores that path as the re-walk recipe.
+- **Error detection** = crash + visible-error detection (app fell back to the home
+  screen, an error alert/banner, a spinner that never resolves), since mobile-mcp
+  exposes no console or network trace for a native app.
 
 ## Supported app inputs
 
@@ -113,11 +140,18 @@ In a target app's repo, `autobot init` creates:
 ```
 <target-repo>/
 └── .autobot/
-    ├── CLAUDE.md             ← persisted flows + rubric (the source of truth)
+    ├── CLAUDE.md             ← discovered flows (prose, editable — the source of truth)
+    ├── critique-rubric.md    ← UX rubric (extend it per-app)
     ├── .mcp.json             ← mobile-mcp config
     ├── config.json           ← app path, build settings, sim device
+    ├── state-graph.json      ← screen-coverage map, persists across runs
     └── reports/
-        └── 2026-05-27-1430/  ← per-run screenshots + report.html
+        └── 2026-05-27-1430/
+            ├── journal.jsonl     ← step trace
+            ├── flaws.jsonl       ← every flaw, with screenshot refs
+            ├── critique.jsonl    ← per-screenshot verdicts
+            ├── screenshots/      ← <flow>__NN_<action>.png
+            └── report.html       ← open this
 ```
 
 ## CI (v2 plan)
