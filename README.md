@@ -72,12 +72,58 @@ adapted for iOS.)
   tap-path each, plus action edges. Discovery and the exploratory pass always know
   what they haven't seen yet.
 
-**iOS vs. web, honestly:** web screens are URL-addressable, so on webbot backtracking
-to any prior state is a single `navigate` call and console/network errors are free
-evidence after every step. iOS has neither. So on autobot:
+### The drive loop — every step writes to disk before moving on
+
+Each numbered step runs the same tight loop. Memory is appended *as the step finishes*,
+not batched at the end — so a killed or crashed run still has a complete record:
+
+```
+                         ┌──────────────────── one step ────────────────────┐
+                         │                                                   │
+   ┌─────────────┐       │  ① SEE          ② ACT        ③ CHECKPOINT         │
+   │ state-graph │◀──────┤  list_elements   tap /        save_screenshot     │
+   │   .json     │ reach  │  (a11y tree) ──▶ type /  ──▶  <flow>__NN_*.png    │
+   │ (the map)   │ path   │  + screenshot    swipe       in screenshots/      │
+   └─────────────┘       │                                     │             │
+         ▲                │                                     ▼             │
+         │ new screen?    │  ⑤ JOURNAL              ④ CRASH / ERROR CHECK     │
+         │ add node +     │  append 1 line   ◀────  app on springboard?       │
+         └─ edge ─────────┤  to journal.jsonl       error banner? stuck       │
+                          │         │               spinner? (no console/net  │
+                          │         │                on iOS — eyes only)       │
+                          │         ▼                       │                  │
+                          │   ┌──────────────┐              │ flaw?            │
+                          │   │ journal.jsonl │             ▼                  │
+                          │   └──────────────┘     ┌──────────────┐           │
+                          │                         │  flaws.jsonl │           │
+                          └─────────────────────────└──────┬───────┘──────────┘
+                                                           │ screenshot refs
+                                                           ▼
+                                            critique pass → report.html
+```
+
+### Backtracking — relaunch and re-walk, because iOS has no URLs
+
+This is the one place the web approach **doesn't** port. On the web (webbot) every
+screen has a URL, so returning to a prior state is a single `navigate` call and
+console/network errors are free evidence after every step. iOS has neither — so autobot
+adapts:
+
+```
+   web (webbot):   browser_navigate("/settings")        ← one call, instant
+   ───────────────────────────────────────────────────────────────────────
+   iOS (autobot):  mobile_launch_app(bundleId)          ← relaunch …
+                       │
+                       ▼   then re-walk the node's stored `reach` path:
+                   "launch → tap Settings tab → tap Account"
+                       │         │                 │
+                       ▼         ▼                 ▼
+                    [Home] ──▶ [Settings] ──▶ [Account]   ← back where you were
+```
 
 - **Backtracking** = relaunch the app and re-walk a screen's stored `reach` path (or a
-  known deep-link URL scheme) — the state graph stores that path as the re-walk recipe.
+  known `myapp://` deep-link scheme via `mobile_open_url` if one exists). The state
+  graph stores that path as the re-walk recipe — backtrack deliberately, it isn't free.
 - **Error detection** = crash + visible-error detection (app fell back to the home
   screen, an error alert/banner, a spinner that never resolves), since mobile-mcp
   exposes no console or network trace for a native app.
