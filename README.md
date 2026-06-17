@@ -33,21 +33,6 @@ v1 prototype. Single-machine, simulator-only, one app per project directory.
 
 ## How it works
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  autobot init <app>     ← discover flows, save to CLAUDE.md │
-│  autobot run            ← re-run flows, produce HTML report │
-│  autobot heal           ← repair flow when UI drifts        │
-└──────────────────────────────────────────────────────────────┘
-            │
-            ▼
-   Claude Code (subprocess)
-            │
-            │ MCP
-            ▼
-      mobile-mcp ──→ iOS Simulator (simctl)
-```
-
 Two passes per run:
 
 1. **Drive** — Claude executes each flow step-by-step via mobile-mcp, journaling every step and screenshotting every new screen and significant state change.
