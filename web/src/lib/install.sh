@@ -25,6 +25,21 @@ install_all() {
 
   browser_ensure_chromium
 
+  # Optional (macOS): BlackHole loopback + switchaudio-osx for voice-input testing
+  # (web apps with mic/dictation/getUserMedia features). Best-effort, never fatal —
+  # webbot only switches the mic to BlackHole during a voice run and restores it after.
+  if [ "$(uname -s)" = "Darwin" ] && command -v brew >/dev/null 2>&1; then
+    if brew list blackhole-2ch >/dev/null 2>&1; then
+      echo "ok   BlackHole 2ch (voice-input loopback)"
+    else
+      echo ">> Installing BlackHole 2ch for voice-input tests (optional)..."
+      brew install blackhole-2ch >/dev/null 2>&1 \
+        && echo "ok   BlackHole 2ch installed" \
+        || echo "note BlackHole install skipped — run 'webbot setup-audio' later if you need voice input"
+    fi
+    command -v SwitchAudioSource >/dev/null 2>&1 || brew install switchaudio-osx >/dev/null 2>&1 || true
+  fi
+
   # Symlink the CLI onto PATH.
   local link_dir="/usr/local/bin"
   [ -w "$link_dir" ] || link_dir="$HOME/.local/bin"

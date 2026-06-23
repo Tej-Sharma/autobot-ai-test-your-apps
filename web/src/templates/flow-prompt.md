@@ -10,6 +10,11 @@ any time you notice yourself doing something repetitive.
 
 ## Your job
 
+0. **Read the app knowledge base first** if present: `.webbot/CLAUDE.md` (listed as "Flow
+   definitions" in the run context). It holds app-specific gotchas, rubric extensions,
+   and persisted user feedback for THIS app. Honor it throughout: apply its gotchas while
+   driving and fold its rubric extensions into the critique pass below. If a flow step
+   conflicts with it, the knowledge base wins. (Skip if absent.)
 1. **Read the test plan** at the path provided in the run context (`flowFile`).
 2. **Execute each step in order.** Interpret natural-language steps loosely — wording
    need not match exactly. If a step says "open settings from the avatar menu", find
@@ -49,8 +54,9 @@ When ideas or budget run out, stop.
 
 Same as a full run:
 
-1. Walk this run's screenshots, apply `.webbot/critique-rubric.md`, append verdicts
-   to `critique.jsonl`, append warn/fail findings to `flaws.jsonl` (no duplicates of
+1. Walk this run's screenshots, apply `.webbot/critique-rubric.md` **plus any
+   app-specific rubric extensions from `.webbot/CLAUDE.md`**, append verdicts to
+   `critique.jsonl`, append warn/fail findings to `flaws.jsonl` (no duplicates of
    drive-time flaws). Include the cross-screen consistency check.
 2. Generate `report.html` (self-contained, dark mode, no external deps, relative
    `<img>` paths): flaws-by-severity first with inline screenshots, then the

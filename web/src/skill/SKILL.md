@@ -18,7 +18,7 @@ When the user asks for visual/UI testing of a web app, run webbot.
 
 1. If `webbot` is not on PATH (`command -v webbot` fails) → tell the user to run:
    ```
-   curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/web/install.sh | bash
+   curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ai-test-your-apps/development/web/install.sh | bash
    ```
    (or `~/.webbot/web/bin/webbot install` if already cloned, or `./web/bin/webbot install`
    from a checkout). Wait for it, then continue.
@@ -57,6 +57,42 @@ When the user asks for visual/UI testing of a web app, run webbot.
   - `.webbot/reports/latest/journal.jsonl` — the full step trace
 - Surface the top high-severity flaws to the user (one line each, with the
   screenshot filename so they can look).
+
+## Persisting user feedback (do this every time)
+
+The session is ephemeral — nothing said here carries to the next `webbot run`. The
+durable memory is the target app's `.webbot/`. So whenever the user points anything out —
+a flaw to watch for, a new flow, "do this / don't do that," a preference, a correction —
+**persist it automatically. Do NOT ask for confirmation.**
+
+Memory is per-app, keyed by the app's own directory: each project has its OWN `.webbot/`.
+ALWAYS run webbot from the app's repo root; if Claude Code was launched elsewhere, `cd`
+into the app dir first (or pass `--work-dir <dir>`). Never run an app from a shared/
+transient folder ($HOME, scratch) — apps would collide on one `.webbot/`. For a deployed
+URL with no local source, pick ONE stable folder and always return to it.
+
+Route the feedback:
+- a flow / steps / ordering → `## Critical flows` in `.webbot/CLAUDE.md` (or a flow file)
+- a judging rule ("flag X", "ignore Y", brand color, tone) → `## App-specific rubric extensions`
+- a quirk to expect/ignore → `## Known gotchas`
+- a login / test account → `webbot creds add` (stored in `.webbot/config.json`, NOT CLAUDE.md)
+- a tester preference (persona, choices, focus areas) → `webbot creds add` (preferences field)
+
+After saving, note in one line what you stored and where, then carry on. (This mirrors
+the run pass, which already writes drift back to `.webbot/CLAUDE.md`.)
+
+## Voice / audio testing (macOS)
+
+If a flow involves voice input (mic, dictation, speech, `getUserMedia`, audio recording):
+1. Ensure BlackHole is installed: `webbot doctor` reports whether voice testing is ready;
+   if not, run `webbot setup-audio` once (installs BlackHole + switchaudio-osx).
+2. Do NOT switch audio devices yourself. When a flow mentions voice, webbot automatically
+   routes the host mic to BlackHole for the run, grants the browser mic permission, and
+   restores the user's normal mic/output afterward (even on crash/timeout), warning if a
+   meeting app is running.
+3. Inside flow steps, audio is triggered via Bash: `webbot speak "the phrase"`.
+4. If the user says their mic is stuck after a run, `webbot audio status` shows current
+   routing and `webbot audio restore` reverts it.
 
 ## Notes for the model
 

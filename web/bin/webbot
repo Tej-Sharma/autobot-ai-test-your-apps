@@ -34,9 +34,31 @@ source "$WEBBOT_HOME/src/lib/claude.sh"
 source "$WEBBOT_HOME/src/lib/notify.sh"
 source "$WEBBOT_HOME/src/lib/install.sh"
 source "$WEBBOT_HOME/src/lib/setup.sh"
+source "$WEBBOT_HOME/src/lib/audio.sh"
 
-WEBBOT_DIR="$PWD/.webbot"
-CONFIG_FILE="$WEBBOT_DIR/config.json"
+# Set by the dispatcher from a global `--work-dir <dir>` flag (or WEBBOT_WORK_DIR env).
+# When set, commands operate on <dir>/.webbot instead of the current directory.
+WEBBOT_WORK_DIR="${WEBBOT_WORK_DIR:-}"
+
+webbot_set_dirs() { WEBBOT_DIR="$PWD/.webbot"; CONFIG_FILE="$WEBBOT_DIR/config.json"; }
+
+# cd into the directory whose .webbot/ this run should use, announcing the move when it
+# differs from $PWD. An explicit --work-dir / WEBBOT_WORK_DIR always wins; else the
+# caller's default. Re-derives WEBBOT_DIR/CONFIG_FILE so all relative state follows.
+# Args: <default-work-dir>
+webbot_enter_work_dir() {
+  local target="${WEBBOT_WORK_DIR:-$1}"
+  [ -z "$target" ] && target="$PWD"
+  mkdir -p "$target"
+  target="$(cd "$target" && pwd)"
+  if [ "$target" != "$PWD" ]; then
+    echo ">> webbot state dir: $target/.webbot (use --work-dir to override)" >&2
+    cd "$target"
+  fi
+  webbot_set_dirs
+}
+
+webbot_set_dirs
 
 usage() {
   cat <<EOF
@@ -50,6 +72,9 @@ Usage:
   webbot run                         Re-run discovered flows + report
   webbot go                          run + notification + open report
   webbot flow <flow-file.md>         Execute a custom test plan
+  webbot setup-audio                 Install BlackHole + switchaudio-osx (macOS; voice tests)
+  webbot audio [status|on|off|restore]  Show / toggle / restore mic routing
+  webbot speak <phrase>              TTS + play (feeds the browser mic via loopback)
   webbot doctor                      Verify environment
   webbot help
 
@@ -58,9 +83,15 @@ Usage:
   http://localhost:3000              (already-running dev server)
   /path/to/my-app                    (local project — dev server auto-started)
 
+Options (append to any subcommand):
+  --work-dir <dir>        Put .webbot/ under <dir> instead of the current directory.
+                          (init auto-anchors to a local project's own directory.)
+
 Env:
   WEBBOT_APP_URL          URL a local project serves on (default: http://localhost:3000)
   WEBBOT_CLAUDE_MODEL     Claude model (default: claude-opus-4-8)
+  WEBBOT_WORK_DIR         Same as --work-dir
+  WEBBOT_TTS_VOICE        macOS `say` voice for voice tests (default: Samantha)
   WEBBOT_HEADLESS=1       Run the browser headless
   WEBBOT_TRACE=1          Enable devtools caps (Playwright tracing tools) for the agent
   WEBBOT_TIMEOUT_SECONDS  Wall-clock kill for the agent (default: 900)
@@ -109,12 +140,26 @@ run_pass() {
   # Pre-seed the journals so the agent's first append always works.
   touch "$run_dir/journal.jsonl" "$run_dir/flaws.jsonl" "$run_dir/critique.jsonl"
 
-  trap app_stop EXIT
+  # If the flows involve voice (mic/dictation/getUserMedia), route the host mic to
+  # BlackHole for the run and grant the browser mic permission. Devices are ALWAYS
+  # restored afterward — even on crash/timeout/Ctrl-C (the cleanup trap).
+  local voice=0 grant_mic=0
+  local -a _vfiles=("$WEBBOT_DIR/CLAUDE.md"); [ -n "$flow_file" ] && _vfiles+=("$flow_file")
+  if grep -qiE 'voice|microphone|dictation|speech|getusermedia|record audio|audio call|hold to talk|(^|[^a-zA-Z])mic([^a-zA-Z]|$)' \
+       "${_vfiles[@]}" 2>/dev/null; then voice=1; fi
+
+  _webbot_cleanup() { app_stop; [ "${voice:-0}" = 1 ] && { audio_restore >/dev/null 2>&1 || true; }; }
+  trap _webbot_cleanup EXIT INT TERM
   app_start "$dev_command" "$dev_dir" "$app_url" "$run_dir"
+
+  if [ "$voice" = 1 ] && command -v SwitchAudioSource >/dev/null 2>&1; then
+    audio_meeting_warning
+    if audio_enter_test_mode; then grant_mic=1; fi
+  fi
 
   local mcp_config ctx prompt
   mcp_config=$(mktemp -t webbot-mcp)
-  browser_write_mcp_config "$mcp_config" "$run_dir" "$storage_state"
+  browser_write_mcp_config "$mcp_config" "$run_dir" "$storage_state" "$grant_mic"
   ctx=$(mktemp -t webbot-ctx)
   local auth_block; auth_block=$(config_auth_block "$CONFIG_FILE")
   claude_write_run_context "$ctx" "$app_url" "$run_dir" "$WEBBOT_DIR" "$flow_file" "$auth_block"
@@ -124,8 +169,9 @@ run_pass() {
   claude_run "$prompt" "$mcp_config" "$PWD" || true
 
   rm -f "$prompt" "$ctx" "$mcp_config"
+  [ "$voice" = 1 ] && { audio_restore || true; }
   app_stop
-  trap - EXIT
+  trap - EXIT INT TERM
 
   # Playwright MCP sometimes resolves screenshot filenames against the process cwd
   # instead of --output-dir. Sweep strays (only PNGs newer than this run) into the
@@ -151,11 +197,13 @@ cmd_init() {
   local app_url="" dev_command="" dev_dir=""
   case "$target" in
     http://*|https://*)
+      webbot_enter_work_dir "$PWD"   # deployed URL: no source dir, anchor to cwd (or --work-dir)
       app_url="$target"
       ;;
     *)
       [ -d "$target" ] || { echo "ERR: $target is neither a URL nor a directory" >&2; exit 1; }
       dev_dir="$(cd "$target" && pwd)"
+      webbot_enter_work_dir "$dev_dir"   # local project: anchor .webbot/ to the app's own dir
       dev_command=$(app_detect_dev_command "$dev_dir")
       app_url="${WEBBOT_APP_URL:-http://localhost:3000}"
       if [ -z "$dev_command" ]; then
@@ -195,6 +243,7 @@ EOF
 }
 
 cmd_auth() {
+  webbot_enter_work_dir "$PWD"
   config_require
   local app_url; app_url=$(config_get app_url)
   browser_capture_auth "$app_url" "$WEBBOT_DIR/storage-state.json"
@@ -208,6 +257,7 @@ json.dump(cfg, open(sys.argv[1], 'w'), indent=2)
 
 # Manage the persistent credential list + tester preferences in config.json.
 cmd_creds() {
+  webbot_enter_work_dir "$PWD"
   config_require
   case "${1:-list}" in
     add)
@@ -232,6 +282,7 @@ json.dump(cfg, open(sys.argv[1], 'w'), indent=2)
 }
 
 cmd_run() {
+  webbot_enter_work_dir "$PWD"
   config_require
   if [ ! -f "$WEBBOT_DIR/CLAUDE.md" ]; then
     echo "ERR: no $WEBBOT_DIR/CLAUDE.md (no discovered flows) — run 'webbot init' first." >&2
@@ -245,10 +296,11 @@ cmd_run() {
 }
 
 cmd_flow() {
-  config_require
   local flow_file="${1:-}"
   [ -f "$flow_file" ] || { echo "ERR: webbot flow <flow-file.md>" >&2; exit 1; }
   flow_file="$(cd "$(dirname "$flow_file")" && pwd)/$(basename "$flow_file")"
+  webbot_enter_work_dir "$PWD"
+  config_require
   run_pass "$WEBBOT_HOME/src/templates/flow-prompt.md" "$flow_file"
   local flaws; flaws=$(flaw_count "$LAST_RUN_DIR/flaws.jsonl")
   notify_user "webbot" "Flow complete — $flaws flaw(s) recorded"
@@ -257,6 +309,7 @@ cmd_flow() {
 }
 
 cmd_doctor() {
+  webbot_enter_work_dir "$PWD"
   local ok=1
   for bin in node npx claude curl /usr/bin/python3; do
     if command -v "$bin" >/dev/null 2>&1; then
@@ -270,6 +323,8 @@ cmd_doctor() {
   else
     echo "MISS playwright — run: webbot install"; ok=0
   fi
+  # Audio loopback is informational (only voice-input flows need it).
+  audio_doctor || true
   if [ -f "$CONFIG_FILE" ]; then
     echo "ok   $CONFIG_FILE (app: $(config_get app_url))"
     local ss; ss=$(config_get storage_state)
@@ -284,16 +339,60 @@ cmd_doctor() {
   [ "$ok" = 1 ] && echo "all good." || { echo "missing tools above."; exit 1; }
 }
 
+# --- audio (voice-input testing) ---------------------------------------------
+
+cmd_setup_audio() { audio_install_loopback; }
+
+cmd_speak() {
+  local phrase="${1:-}"
+  [ -n "$phrase" ] || { echo "ERR: webbot speak <phrase>" >&2; exit 1; }
+  audio_speak "$phrase"
+}
+
+cmd_tts() {
+  local phrase="${1:-}" out_path="${2:-}"
+  [ -n "$phrase" ] || { echo "ERR: webbot tts <phrase> [out.aiff]" >&2; exit 1; }
+  local file; file=$(audio_synthesize "$phrase")
+  if [ -n "$out_path" ]; then mv "$file" "$out_path"; echo "$out_path"; else echo "$file"; fi
+}
+
+cmd_audio() {
+  case "${1:-status}" in
+    status)      audio_status ;;
+    save)        audio_save && echo "audio: saved current devices" >&2 ;;
+    on)          audio_meeting_warning; audio_enter_test_mode ;;
+    off|restore) audio_restore || echo "audio: nothing to restore (no saved state)" >&2 ;;
+    *) echo "usage: webbot audio [status|on|off|save|restore]" >&2; exit 1 ;;
+  esac
+}
+
 # --- dispatch ----------------------------------------------------------------
 
-case "${1:-help}" in
+# Pull a global `--work-dir <dir>` (or --work-dir=<dir>) out of the args, wherever it
+# appears, so any subcommand can be redirected to another directory.
+SUB="${1:-help}"; shift || true
+REST=()
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --work-dir)   WEBBOT_WORK_DIR="${2:-}"; shift 2 || shift ;;
+    --work-dir=*) WEBBOT_WORK_DIR="${1#*=}"; shift ;;
+    *)            REST+=("$1"); shift ;;
+  esac
+done
+set -- ${REST[@]+"${REST[@]}"}
+
+case "$SUB" in
   install) install_all "$WEBBOT_HOME" ;;
-  init)    shift; cmd_init "$@" ;;
+  init)    cmd_init "$@" ;;
   auth)    cmd_auth ;;
-  creds)   shift; cmd_creds "$@" ;;
+  creds)   cmd_creds "$@" ;;
   run|go)  cmd_run ;;
-  flow)    shift; cmd_flow "$@" ;;
+  flow)    cmd_flow "$@" ;;
+  setup-audio) cmd_setup_audio ;;
+  audio)   cmd_audio "$@" ;;
+  speak)   cmd_speak "$@" ;;
+  tts)     cmd_tts "$@" ;;
   doctor)  cmd_doctor ;;
   help|-h|--help) usage ;;
-  *) echo "ERR: unknown subcommand '$1'" >&2; usage; exit 1 ;;
+  *) echo "ERR: unknown subcommand '$SUB'" >&2; usage; exit 1 ;;
 esac

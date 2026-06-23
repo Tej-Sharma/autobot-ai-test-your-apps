@@ -7,9 +7,9 @@ set -euo pipefail
 # Write a temporary .mcp.json enabling Playwright MCP for this run.
 # - --isolated: clean profile per run (reproducible); auth comes from storage-state
 # - --output-dir: where browser_take_screenshot saves files → <run-dir>/screenshots
-# Args: <out-path> <run-dir> <storage-state-path-or-empty>
+# Args: <out-path> <run-dir> <storage-state-path-or-empty> <grant-mic-0/1>
 browser_write_mcp_config() {
-  local out="$1" run_dir="$2" storage_state="${3:-}"
+  local out="$1" run_dir="$2" storage_state="${3:-}" grant_mic="${4:-0}"
 
   local -a extra=()
   if [ -n "$storage_state" ] && [ -f "$storage_state" ]; then
@@ -22,6 +22,12 @@ browser_write_mcp_config() {
     # Exposes browser_start_tracing/stop_tracing (full Playwright trace into
     # --output-dir) for failure forensics; the agent uses them when told to.
     extra+=("\"--caps\", \"devtools\",")
+  fi
+  # Voice-input flows: auto-accept the getUserMedia permission prompt so the page can
+  # read the (BlackHole) system mic — real device, NOT synthetic. Set WEBBOT_NO_MIC_ARG=1
+  # if your @playwright/mcp build rejects --browser-arg.
+  if [ "$grant_mic" = 1 ] && [ -z "${WEBBOT_NO_MIC_ARG:-}" ]; then
+    extra+=("\"--browser-arg\", \"--use-fake-ui-for-media-stream\",")
   fi
 
   mkdir -p "$run_dir/screenshots"
