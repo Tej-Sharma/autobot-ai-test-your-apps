@@ -41,3 +41,13 @@ Then `mobile_launch_app` (or `simctl launch`) works without daemon dependency.
 **Why this can't be solved by mobile-mcp alone**: mobile-mcp is bundle-agnostic. The scoping is the prompt's job.
 
 <!-- Add lessons here as the project evolves -->
+
+## Audio: never route the Simulator's default OUTPUT to BlackHole alone (2026-06-23)
+
+**Symptom**: a clock-sensitive voice app (VPIO / `.voiceChat` / real-time interpretation, e.g. CIR) hard-crashes with SIGABRT on the iOS Simulator: `mainMixerNode → AURemoteIO::Cleanup → _ReportRPCTimeout → abort()`.
+
+**Cause**: BlackHole is a clockless virtual driver. When it's the *sole* default output, the Simulator's output `AURemoteIO` has no hardware clock and its start/cleanup RPC times out → abort. Setting `SwitchAudioSource -t output -s "BlackHole 2ch"` triggers it. (Input = BlackHole is fine; only OUTPUT-alone is the trap, and only for apps that bring up an output/duplex AURemoteIO.)
+
+**Fix**: route output through a STACKED Multi-Output aggregate whose clock master is a REAL device + BlackHole (drift-corrected), created via CoreAudio `AudioHardwareCreateAggregateDevice` (see `src/lib/audio-multiout.swift`). Never BlackHole alone.
+
+**Process lesson (why we shipped the bug)**: the audio rework was "validated" only with device save/restore round-trips — never an actual voice flow against a real clock-sensitive app + Simulator. Plumbing tests pass while the real failure mode (the app crashing) goes untested. **When changing audio/device/system routing, the validation must reproduce the actual end-to-end scenario (a voice app capturing piped audio without crashing), not just confirm the shell wiring.** A clean save/restore round-trip is necessary but nowhere near sufficient.
