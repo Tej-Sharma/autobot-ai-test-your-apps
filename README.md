@@ -2,7 +2,9 @@
 
 <img width="729" height="442" alt="CleanShot 2026-06-22 at 19 11 38" src="https://github.com/user-attachments/assets/aaf6d643-b548-4bfb-9dec-3877d6bb6e1a" />
 
-Free visual-first iOS QA driven by Claude Code + mobile-mcp
+
+Visually sees and clicks through your web + ios apps using your existing Claude Code.
+Comes with smart memory and state tracking to mimic a smart QA tester stress testing your product to find bugs for you before you push to production.
 
 Just plug it in your existing Claude Code, and AutoBot has a memory system + testing flows understanding of your app to test through it.
 
@@ -23,9 +25,9 @@ Then open Claude Code and give it the location of your projects:
 - `test my ios app using the autobot skill`
 - `test my web app using the webbot skill`
 
-## Easy to Setup, 24/7 Testing Your Products
+## Test Your Products before Merging PRs, Pushing to Production, or In Production
 
-This is if you want a cloud-hosted tester that is always testing your web and mobile apps to ensure no frontend UI bug or backend error exists. 
+A cloud-hosted tester that is routinely fully testing your web and mobile apps to ensure none of your users are hitting bugs that will hurt your company's reputation.
 
 📦 [Get It Here](https://autobot.it.com/)
 
