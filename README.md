@@ -1,5 +1,7 @@
 # autobot - automatically test your web + mobile apps
 
+<img width="729" height="442" alt="CleanShot 2026-06-22 at 19 11 38" src="https://github.com/user-attachments/assets/aaf6d643-b548-4bfb-9dec-3877d6bb6e1a" />
+
 Free visual-first iOS QA driven by Claude Code + mobile-mcp
 
 Just plug it in your existing Claude Code, and AutoBot has a memory system + testing flows understanding of your app to test through it.
