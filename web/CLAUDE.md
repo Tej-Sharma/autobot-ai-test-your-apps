@@ -45,8 +45,15 @@ critique re-run without re-driving.
 - Bash CLI, no compile step
 - Discovery is interactive (Claude proposes flows, user confirms in `.webbot/CLAUDE.md`)
 - Reports are static HTML in `.webbot/reports/`
-- Auth via Playwright storage-state (`webbot auth` opens a headed browser, user logs
-  in manually, cookies/localStorage saved and injected into future isolated runs)
+- Auth, two ways:
+  - **Stored test credentials** (default): `webbot init` prompts for a list of logins
+    + tester preferences (or seed via `WEBBOT_CRED_EMAIL`/`WEBBOT_CRED_PASSWORD`/
+    `WEBBOT_PREFS`); `webbot creds [add|list|clear]` manages them. They persist in
+    `.webbot/config.json` and are injected into every run's context (`config_auth_block`
+    in `src/lib/setup.sh` → `claude_write_run_context`). The driving agent types them
+    into the app's own login form, so discovery can map the gated product too.
+  - **Storage-state** (`webbot auth`): opens a headed browser, user logs in manually,
+    cookies/localStorage saved and injected into future isolated runs.
 
 ## v2 candidates (deferred)
 
@@ -71,6 +78,9 @@ critique re-run without re-driving.
 - `src/lib/app.sh` — dev-server detect/start/health/stop
 - `src/lib/browser.sh` — Playwright MCP config, storage-state capture, chromium install
 - `src/lib/claude.sh` — prompt composition (+ run context) and `claude --print` spawn
+- `src/lib/setup.sh` — interactive prompts (tty, autobot-wizard idiom) + persistent
+  credential list / tester preferences in config.json + `config_auth_block` for the
+  run context
 - `src/templates/_shared-rules.md` — global rules: journals, screenshot checkpoints,
   stay-on-origin, hard budgets, backtrack-by-URL
 - `src/templates/discover-prompt.md` — first-run exploration + state-graph building
@@ -89,6 +99,13 @@ critique re-run without re-driving.
   because Claude reads natural language better than it parses structured DSLs
 - Journals: JSONL, append-only, written the moment something happens — never batched
 - Critique rubric: editable markdown — users extend it per-app
+- Persistent vs per-run state: config, credentials, preferences, and `state-graph.json`
+  persist in `.webbot/` across runs; journals + report are per-run under
+  `.webbot/reports/<run-id>/` so each run starts a fresh trace
+- The driving agent (per `_shared-rules.md`) auto-answers onboarding/setup/preference
+  screens (best per stored preferences, else a sensible default — never stalls) and
+  fills inputs with realistic, app-appropriate sample data; tester preferences from
+  config steer persona/choices/data style
 
 ## What Claude should NOT do here
 

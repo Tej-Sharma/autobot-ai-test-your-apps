@@ -24,9 +24,9 @@ claude_compose_prompt() {
 
 # Write the run-context block every pass receives. All paths absolute — they cross
 # a process boundary into the spawned claude.
-# Args: <out-path> <app-url> <run-dir> <webbot-dir> [flow-file]
+# Args: <out-path> <app-url> <run-dir> <webbot-dir> [flow-file] [auth-block]
 claude_write_run_context() {
-  local out="$1" app_url="$2" run_dir="$3" webbot_dir="$4" flow_file="${5:-}"
+  local out="$1" app_url="$2" run_dir="$3" webbot_dir="$4" flow_file="${5:-}" auth_block="${6:-}"
   cat > "$out" <<EOF
 # Run context
 
@@ -48,6 +48,11 @@ EOF
 - **flowFile (the test plan to execute)**: $flow_file
 - **Counter file (create if a flow needs unique values)**: $webbot_dir/counter
 EOF
+  fi
+  # Credentials + tester preferences (from .webbot/config.json, via webbot creds /
+  # the init setup step). Present only when the user configured them.
+  if [ -n "$auth_block" ]; then
+    { echo; echo "$auth_block"; } >> "$out"
   fi
 }
 

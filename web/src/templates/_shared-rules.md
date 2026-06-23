@@ -217,6 +217,43 @@ spinner is still spinning after ~10s, that's a flaw, not a reason to keep waitin
 user would do, note the choice in the journal line, keep going. This is unattended
 automation — never ask the user mid-run.
 
+**Onboarding / setup / preference questions — always answer and move forward.** Many
+apps gate the product behind setup wizards, role/goal pickers, "what brings you here?"
+surveys, plan choosers, permission prompts, "invite your team", etc. Never stall on
+these and never abandon a flow because of them:
+
+1. If the run context's **tester preferences** or the flow file specify a choice (a
+   persona, a plan, an answer), pick the option that best matches it.
+2. Otherwise pick the most sensible default for a typical user — the pre-selected /
+   recommended / free option, "Skip"/"Maybe later"/"Do this later" for optional steps,
+   "Allow" for permissions the flow needs (deny ones it doesn't, like notifications).
+3. If nothing distinguishes the options, just pick one reasonable choice (e.g. the
+   first) and proceed — an arbitrary valid answer beats getting stuck.
+
+Journal the choice in `notes`. The goal is always to get THROUGH onboarding to the
+real product so the actual flows can be tested. Treat a wizard you can't get past as a
+`functional` flaw, not a reason to stop the run.
+
+**Fill inputs with realistic, app-appropriate sample content.** To genuinely exercise
+a feature you must give it believable data, not `test`/`asdf`/`aaa`. Infer the app's
+domain from the flow file / overview and generate content that fits:
+
+- A note/knowledge app → a real-sounding note ("Q3 planning: cut scope on the mobile
+  rewrite, ship search first"). A task app → a plausible task. A CRM → a realistic
+  contact. A recorder → speak/record a coherent sentence. A search box → a query that
+  would actually match seeded content.
+- Make values valid for their field: well-formed emails, in-range numbers, dates that
+  parse, URLs that resolve in shape. Respect length and format hints.
+- Vary content across items so lists/search/dedup are actually tested (don't paste the
+  same string into every row).
+- Use the run context's tester preferences for tone/persona when provided. Avoid
+  profanity, real personal data, and anything destructive.
+- For unique-per-run values (signup email, etc.) use the counter mechanism described
+  in the pass prompt rather than a hardcoded constant.
+
+The point is to drive features the way a real user would and surface bugs that only
+appear with real-shaped input — empty/placeholder data hides most of them.
+
 **Never invent UI that isn't there.** If there's no "Log out" anywhere in the profile
 or settings, don't pretend — journal the step as failed and record a flaw
 (`functional`, "no visible logout affordance").

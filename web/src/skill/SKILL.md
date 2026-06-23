@@ -30,12 +30,23 @@ When the user asks for visual/UI testing of a web app, run webbot.
 3. Otherwise → ask the user for:
    - **The app**: a URL (deployed or already-running dev server) OR a local project
      path (webbot auto-starts `npm run dev` etc.)
-   - **Login needs**: if the app requires auth, run `webbot auth` after init — a
-     browser opens, the user logs in manually, state is saved for all future runs
+   - **Login needs**: if the app requires auth, get **test credentials** (email +
+     password). `webbot init` prompts for these (and tester preferences) interactively
+     when run in a terminal and stores them in `.webbot/config.json` (a list — multiple
+     logins allowed) for reuse by every run. When you (the model) spawn webbot
+     non-interactively, pass them instead via env on the init/run command:
+     `WEBBOT_CRED_EMAIL`, `WEBBOT_CRED_PASSWORD` (optional `WEBBOT_CRED_LABEL`,
+     `WEBBOT_PREFS`), or add them after init with `webbot creds add`. The driving agent
+     types these into the app's own login form — so discovery can map the gated product
+     too. (`webbot auth` is the alternative: a manual browser login captured as
+     storage-state.)
+   - **Tester preferences** (optional): persona, choices to make on onboarding/
+     preference screens, sample-data style, areas to focus/avoid. Stored alongside
+     credentials and honored every run. Pass via `WEBBOT_PREFS` when non-interactive.
    - **The core flows to test** (optional): 3–7 user flows in natural language —
      or let `webbot init` discover them
 
-   Then run `webbot init <url-or-path>`.
+   Then run `webbot init <url-or-path>` (prefix the env vars above if you have creds).
 
 ## After running
 
@@ -53,7 +64,18 @@ When the user asks for visual/UI testing of a web app, run webbot.
   claude-in-chrome or other browser tools from this conversation. Spawn webbot and
   let its internal Claude subprocess do it (tighter scoping, budget caps, journals).
 - Outputs live in `.webbot/` next to the user's working directory — treat it as the
-  source of truth.
+  source of truth. Persistent local state (config, credentials, preferences,
+  state-graph) lives there and is reused across runs; the per-run journals + report
+  live under `.webbot/reports/<run-id>/` so every run gets a fresh trace.
+- **Credentials + preferences are stored locally and injected into every run's
+  context** automatically — you don't paste them into prompts or flow files. Manage
+  them with `webbot creds [list|add|clear]`. The agent types credentials into the
+  app's own forms.
+- The driving agent **auto-answers onboarding/setup/preference screens** (best option
+  per the stored preferences, else a sensible default — never stalls) and **fills
+  inputs with realistic, app-appropriate sample data** so features are genuinely
+  exercised. These behaviors are baked into the run prompts; no per-run instruction
+  needed.
 - Budget defaults: 15min wall-clock kill, $3 spend cap, 80 scripted + 30 exploration
   tool calls per flow.
 - `WEBBOT_HEADLESS=1` for headless; default is a visible browser window.

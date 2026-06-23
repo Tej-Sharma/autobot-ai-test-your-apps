@@ -149,8 +149,8 @@ claude_run() {
   # Budgets:
   # - wall-clock: AUTOBOT_TIMEOUT_SECONDS (default 600 = 10min). Hard kill.
   # - dollars: AUTOBOT_MAX_BUDGET_USD (default 2). Claude self-aborts on exhaustion.
-  local timeout_s="${AUTOBOT_TIMEOUT_SECONDS:-600}"
-  local budget_usd="${AUTOBOT_MAX_BUDGET_USD:-2}"
+  local timeout_s="${AUTOBOT_TIMEOUT_SECONDS:-1200}"
+  local budget_usd="${AUTOBOT_MAX_BUDGET_USD:-7}"
 
   # macOS doesn't ship GNU `timeout`; prefer gtimeout, fall back to perl.
   local -a timeout_cmd

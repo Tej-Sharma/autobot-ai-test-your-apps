@@ -12,6 +12,9 @@
 
 - Base URL: {{BASE_URL}}
 - Auth: {{AUTH_NOTES}}
+  <!-- If the app needs login, runs sign in with the test credentials in the run
+       context (managed via `webbot creds`); every flow starts authenticated. Don't
+       hardcode the password here — it lives in .webbot/config.json. -->
 
 ## Critical flows
 

@@ -5,6 +5,7 @@
 #   install                     One-shot install of all deps + PATH symlink
 #   init <url-or-project-dir>   Configure the target app, run flow discovery
 #   auth                        Capture login state into .webbot/storage-state.json
+#   creds [add|list|clear]      Manage stored test logins + tester preferences
 #   run                         Re-run discovered flows + critique + HTML report
 #   go                          Alias for run (+ notification + open report)
 #   flow <flow-file.md>         Execute a user-authored test plan
@@ -32,6 +33,7 @@ source "$WEBBOT_HOME/src/lib/browser.sh"
 source "$WEBBOT_HOME/src/lib/claude.sh"
 source "$WEBBOT_HOME/src/lib/notify.sh"
 source "$WEBBOT_HOME/src/lib/install.sh"
+source "$WEBBOT_HOME/src/lib/setup.sh"
 
 WEBBOT_DIR="$PWD/.webbot"
 CONFIG_FILE="$WEBBOT_DIR/config.json"
@@ -44,6 +46,7 @@ Usage:
   webbot install                     One-shot install of all deps
   webbot init <url-or-project-dir>   Configure target + discover flows
   webbot auth                        Capture login state (manual login, saved for runs)
+  webbot creds [add|list|clear]      Manage stored test logins + tester preferences
   webbot run                         Re-run discovered flows + report
   webbot go                          run + notification + open report
   webbot flow <flow-file.md>         Execute a custom test plan
@@ -113,7 +116,8 @@ run_pass() {
   mcp_config=$(mktemp -t webbot-mcp)
   browser_write_mcp_config "$mcp_config" "$run_dir" "$storage_state"
   ctx=$(mktemp -t webbot-ctx)
-  claude_write_run_context "$ctx" "$app_url" "$run_dir" "$WEBBOT_DIR" "$flow_file"
+  local auth_block; auth_block=$(config_auth_block "$CONFIG_FILE")
+  claude_write_run_context "$ctx" "$app_url" "$run_dir" "$WEBBOT_DIR" "$flow_file" "$auth_block"
   prompt=$(claude_compose_prompt "$pass_prompt" "$ctx")
 
   echo ">> Spawning Claude (model: ${WEBBOT_CLAUDE_MODEL:-claude-opus-4-8}) — run dir: $run_dir" >&2
@@ -169,9 +173,16 @@ cmd_init() {
   "app_url": "$app_url",
   "dev_command": "$dev_command",
   "dev_dir": "$dev_dir",
-  "storage_state": ""
+  "storage_state": "",
+  "credentials": [],
+  "preferences": ""
 }
 EOF
+
+  # Ask for login(s) + tester preferences and persist them to config.json. Captured
+  # once, reused by every run (the agent types them into the app's own forms). Doing
+  # this BEFORE discovery means discovery can sign in and map the gated app too.
+  setup_credentials "$CONFIG_FILE"
   # Per-app rubric copy — users extend it; runs read this copy, not the template.
   [ -f "$WEBBOT_DIR/critique-rubric.md" ] || cp "$WEBBOT_HOME/src/templates/critique-rubric.md" "$WEBBOT_DIR/critique-rubric.md"
   # Empty state graph for discovery to fill.
@@ -193,6 +204,31 @@ cfg = json.load(open(sys.argv[1]))
 cfg['storage_state'] = sys.argv[2]
 json.dump(cfg, open(sys.argv[1], 'w'), indent=2)
 " "$CONFIG_FILE" "$WEBBOT_DIR/storage-state.json"
+}
+
+# Manage the persistent credential list + tester preferences in config.json.
+cmd_creds() {
+  config_require
+  case "${1:-list}" in
+    add)
+      # Interactive (or env-seeded) add of one-or-more logins + preferences.
+      setup_credentials "$CONFIG_FILE"
+      echo; setup_show "$CONFIG_FILE"
+      ;;
+    list|show|"")
+      setup_show "$CONFIG_FILE"
+      ;;
+    clear)
+      /usr/bin/python3 -c "
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg['credentials'] = []; cfg['preferences'] = ''
+json.dump(cfg, open(sys.argv[1], 'w'), indent=2)
+" "$CONFIG_FILE"
+      echo ">> Cleared stored credentials + preferences." >&2
+      ;;
+    *) echo "ERR: webbot creds [add|list|clear]" >&2; exit 1 ;;
+  esac
 }
 
 cmd_run() {
@@ -254,6 +290,7 @@ case "${1:-help}" in
   install) install_all "$WEBBOT_HOME" ;;
   init)    shift; cmd_init "$@" ;;
   auth)    cmd_auth ;;
+  creds)   shift; cmd_creds "$@" ;;
   run|go)  cmd_run ;;
   flow)    shift; cmd_flow "$@" ;;
   doctor)  cmd_doctor ;;

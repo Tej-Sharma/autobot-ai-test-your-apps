@@ -87,6 +87,24 @@ cmd_doctor() {
   fi
   # Audio-loopback check is informational, not a hard failure (only voice flows need it).
   audio_doctor || true
+  # Catch non-ASCII chars in the autobot script itself (e.g. smart-quotes or Unicode
+  # ellipsis that an editor auto-corrected — they silently corrupt variable expansions).
+  local self; self=$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || echo "${BASH_SOURCE[0]}")
+  # Detect the specific danger: unbraced $varname immediately followed by a non-ASCII
+  # character (e.g. editor auto-corrected "..." to a Unicode ellipsis, corrupting the name).
+  local bad_lines; bad_lines=$(/usr/bin/python3 - "$self" <<'PY' 2>/dev/null
+import re, sys
+pat = re.compile(rb'\$[a-zA-Z_][a-zA-Z0-9_]*[\x80-\xff]')
+with open(sys.argv[1], 'rb') as f:
+    for i, line in enumerate(f, 1):
+        if pat.search(line):
+            print(f"{i}:{line.rstrip().decode('utf-8', errors='replace')}")
+PY
+  )
+  if [ -n "$bad_lines" ]; then
+    echo "WARN unbraced \$var followed by non-ASCII character — will cause unbound-variable errors:"
+    echo "$bad_lines" | head -5
+  fi
   [ "$ok" = 1 ] && echo "all good." || { echo "missing tools above."; exit 1; }
 }
 
@@ -477,7 +495,7 @@ cmd_go() {
     open -a Simulator --args -CurrentDeviceUDID "$udid" 2>/dev/null || true
   fi
 
-  notify "autobot" "Starting flow for $bundle_id…"
+  notify "autobot" "Starting flow for ${bundle_id}..."
   cmd_flow "$udid" "$bundle_id" "$flow_file"
 
   # Summarize from the latest report, notify, open the HTML.

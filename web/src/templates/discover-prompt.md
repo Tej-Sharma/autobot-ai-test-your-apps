@@ -29,9 +29,13 @@ repetitive.
 6. **Write the result to `.webbot/CLAUDE.md`** using the format below. This file is
    the persisted source of truth for future runs.
 
-If you hit a login wall and the storage state didn't cover it: stop at the wall,
-screenshot it, document what credentials are needed (and that `webbot auth` captures
-them). Do not fabricate credentials or sign up for third-party services.
+If you hit a login wall: check the run context for **test credentials**. If present,
+sign in by typing them into the app's own login/signup form (email+password — not
+OAuth) and keep exploring the authenticated product; that's the whole point, so don't
+stop at the wall when you have a login. If NO credentials are in the run context, stop
+at the wall, screenshot it, and document in `.webbot/CLAUDE.md` that runs need a login
+(addable with `webbot creds add`, or capture a session with `webbot auth`). Never
+fabricate credentials or sign up for third-party services.
 
 If a cookie/consent banner appears, accept the minimal option and move on.
 
@@ -46,7 +50,11 @@ If a cookie/consent banner appears, accept the minimal option and move on.
 
 ## Base URL & auth
 
-<base URL; whether auth is required; whether storage-state covers it>
+<base URL; whether auth is required. If it is, say that runs sign in using the test
+credentials provided in the run context (managed with `webbot creds`), and that each
+flow must start authenticated. Do NOT paste the actual password here — it lives in
+.webbot/config.json. Note the working sign-in path (which fields, which button, avoid
+OAuth).>
 
 ## Critical flows
 
