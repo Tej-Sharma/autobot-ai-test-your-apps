@@ -260,9 +260,14 @@ you're doing the same for live user feedback, automatically.
 ## Voice / audio testing
 
 If the user's flow involves voice input (mic, dictation, voice assistant, audio call):
-1. Verify audio loopback is set up: \`autobot doctor\` should report a loopback input device.
-2. If not, run \`autobot setup-audio\` first (installs BlackHole + sets up routing).
+1. Ensure BlackHole is installed: \`autobot doctor\` reports whether voice testing is ready;
+   if not, run \`autobot setup-audio\` once (installs BlackHole + switchaudio-osx).
+2. Do NOT switch audio devices yourself. When a flow mentions voice, autobot automatically
+   routes the host mic to BlackHole for the run and restores the user's normal mic/output
+   afterward (even on crash/timeout), and warns if a meeting app is running.
 3. Inside flow steps, audio is triggered via Bash: \`autobot speak "the phrase"\`.
+4. If the user says their mic is stuck after a run, \`autobot audio status\` shows current
+   routing and \`autobot audio restore\` reverts it.
 
 ## Available subcommands
 
@@ -271,7 +276,8 @@ If the user's flow involves voice input (mic, dictation, voice assistant, audio 
 - \`autobot go\` — re-run the saved main flow + notify on completion
 - \`autobot flow <udid> <bundle> <file.md>\` — run a specific flow
 - \`autobot doctor\` — verify environment
-- \`autobot setup-audio\` — install + configure BlackHole audio routing
+- \`autobot setup-audio\` — install BlackHole + switchaudio-osx (one-time)
+- \`autobot audio [status|on|off|restore]\` — show / toggle / restore mic routing
 - \`autobot speak <phrase>\` — TTS+play (used inside flows)
 
 ## Notes for the model

@@ -75,6 +75,7 @@ Usage:
   autobot speak <phrase>                              TTS + play (feeds sim mic via loopback)
   autobot tts <phrase> [out.aiff]                     TTS only, echo file path
   autobot setup-audio                                 Install BlackHole + switchaudio-osx
+  autobot audio [status|on|off|restore]               Show / toggle / restore mic routing
   autobot doctor                                      Verify environment
   autobot help
 
@@ -136,6 +137,17 @@ PY
 
 cmd_setup_audio() {
   audio_install_loopback
+}
+
+cmd_audio() {
+  local action="${1:-status}"
+  case "$action" in
+    status)      audio_status ;;
+    save)        audio_save && echo "audio: saved current devices" >&2 ;;
+    on)          audio_meeting_warning; audio_enter_test_mode ;;
+    off|restore) audio_restore || echo "audio: nothing to restore (no saved state)" >&2 ;;
+    *) echo "usage: autobot audio [status|on|off|save|restore]" >&2; exit 1 ;;
+  esac
 }
 
 cmd_install() {
@@ -460,7 +472,26 @@ EOF
 
   local composed; composed=$(claude_compose_prompt "$prompt")
   echo ">> Executing flow: $(basename "$flow_file")" >&2
+
+  # If this flow involves voice, route the host mic to BlackHole for the run and ALWAYS
+  # restore the user's devices afterward — even on crash, timeout, or Ctrl-C (the trap).
+  local voice=0
+  if grep -qiE 'voice|microphone|dictation|audio call|hold to talk|(^|[^a-zA-Z])mic([^a-zA-Z]|$)' \
+       "$flow_file" .autobot/CLAUDE.md 2>/dev/null; then
+    voice=1
+  fi
+  if [ "$voice" = 1 ] && command -v SwitchAudioSource >/dev/null 2>&1; then
+    audio_meeting_warning
+    trap 'audio_restore >/dev/null 2>&1 || true' EXIT INT TERM
+    audio_enter_test_mode || true
+  fi
+
   claude_run "$composed" "$(pwd)/.autobot/.mcp.json" "$(pwd)"
+
+  if [ "$voice" = 1 ] && command -v SwitchAudioSource >/dev/null 2>&1; then
+    audio_restore || true
+    trap - EXIT INT TERM
+  fi
   rm -f "$prompt" "$composed"
 
   ln -snf "$run_id" .autobot/reports/latest
@@ -603,6 +634,7 @@ main() {
     speak)  cmd_speak "$@" ;;
     tts)    cmd_tts "$@" ;;
     setup-audio) cmd_setup_audio ;;
+    audio)  cmd_audio "$@" ;;
     install) cmd_install ;;
     doctor) cmd_doctor ;;
     help|-h|--help) usage ;;

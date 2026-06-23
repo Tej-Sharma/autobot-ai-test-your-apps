@@ -40,9 +40,114 @@ audio_speak() {
   rm -f "$file"
 }
 
-# Install BlackHole + switchaudio-osx via Homebrew if missing, then set BlackHole
-# as the default audio input. Output routing (System Settings > Sound > Output)
-# still requires a manual Multi-Output Device — we print instructions for that.
+# ─────────────────────────────────────────────────────────────────────────────
+# Device routing: save / switch / restore.
+#
+# The iOS Simulator mic reads the host's DEFAULT INPUT device. To feed it audio we
+# must temporarily point that at BlackHole — but doing so globally and permanently
+# is what breaks Zoom/Teams/Meet (your mic goes silent to everyone else). So autobot
+# only flips devices around a run and ALWAYS restores them afterward. The pre-test
+# devices are snapshotted to a small state file so a crashed run can still be undone.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Where the pre-test device snapshot lives (system-global, outside the managed
+# ~/.autobot install dir so an update can't wipe it mid-test).
+audio_state_file() { echo "${AUTOBOT_AUDIO_STATE:-$HOME/.local/state/autobot/audio-devices}"; }
+
+audio_have_switch() { command -v SwitchAudioSource >/dev/null 2>&1; }
+audio_current_input()  { SwitchAudioSource -c -t input  2>/dev/null || true; }
+audio_current_output() { SwitchAudioSource -c -t output 2>/dev/null || true; }
+audio_set_input()  { SwitchAudioSource -t input  -s "$1" >/dev/null 2>&1 || true; }
+audio_set_output() { SwitchAudioSource -t output -s "$1" >/dev/null 2>&1 || true; }
+
+# Snapshot the current input+output devices — but only if we haven't already, so a
+# repeat/nested save can never clobber the genuine pre-test devices.
+audio_save() {
+  audio_have_switch || return 1
+  local f; f=$(audio_state_file)
+  [ -f "$f" ] && return 0
+  mkdir -p "$(dirname "$f")"
+  { audio_current_input; audio_current_output; } > "$f"
+}
+
+# Restore the snapshotted devices and clear the snapshot.
+# Returns 0 if it restored something, 1 if there was nothing saved (prints nothing then).
+audio_restore() {
+  local f; f=$(audio_state_file)
+  [ -f "$f" ] || return 1
+  audio_have_switch || { rm -f "$f"; return 1; }
+  local in out
+  in=$(sed -n '1p' "$f"); out=$(sed -n '2p' "$f")
+  [ -n "$in" ]  && audio_set_input  "$in"
+  [ -n "$out" ] && audio_set_output "$out"
+  rm -f "$f"
+  echo "audio: restored input='$in' output='$out'" >&2
+  return 0
+}
+
+# Warn (don't block) if a conferencing/voice app is running — switching the mic to
+# BlackHole will mute you in that call. Google Meet runs in the browser and can't be
+# reliably detected, so it's mentioned in the message.
+audio_meeting_warning() {
+  local app found=""
+  for app in "zoom.us" "Microsoft Teams" "Webex" "RingCentral" "BlueJeans" "GoTo" "Discord" "FaceTime" "Slack"; do
+    if pgrep -f "$app" >/dev/null 2>&1; then found="$found     - $app"$'\n'; fi
+  done
+  [ -z "$found" ] && return 0
+  echo "⚠ audio: a conferencing/voice app appears to be running:" >&2
+  printf '%s' "$found" >&2
+  echo "  autobot will switch your mic to BlackHole for this test (you'll be muted to that call)," >&2
+  echo "  then restore your devices automatically when it finishes. (Browser calls e.g. Google Meet" >&2
+  echo "  can't be auto-detected — end/mute them first if you're in one.)" >&2
+  return 0
+}
+
+# Enter test mode: save devices, route input (and output) so the sim hears playback.
+# Prefers a Multi-Output device (so you can still monitor); else routes output straight
+# to BlackHole (sim hears it, you won't). Returns 1 if loopback isn't available.
+audio_enter_test_mode() {
+  audio_have_switch || { echo "audio: SwitchAudioSource not installed — run 'autobot setup-audio'." >&2; return 1; }
+  if ! SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
+    echo "audio: BlackHole not available — run 'autobot setup-audio'. Skipping audio routing." >&2
+    return 1
+  fi
+  audio_save
+  audio_set_input "BlackHole 2ch"
+  local multi
+  multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -i "multi-output" | head -1)
+  if [ -n "$multi" ]; then
+    audio_set_output "$multi"
+  else
+    audio_set_output "BlackHole 2ch"
+    echo "audio: no Multi-Output device — routing output to BlackHole for the test (you won't hear playback)." >&2
+  fi
+  echo "audio: test mode ON — input→BlackHole. Devices will be restored when the run ends." >&2
+}
+
+# Leave test mode (alias for restore, used by traps / 'audio off').
+audio_exit_test_mode() { audio_restore || true; }
+
+# Human-readable current routing + test-mode / saved-state flags.
+audio_status() {
+  if ! audio_have_switch; then
+    echo "audio: SwitchAudioSource not installed — run 'autobot setup-audio' for voice tests"
+    return 1
+  fi
+  local in out f; in=$(audio_current_input); out=$(audio_current_output); f=$(audio_state_file)
+  echo "audio input : $in"
+  echo "audio output: $out"
+  case "$in" in
+    *BlackHole*) echo "  ⚠ INPUT is BlackHole — autobot test mode is active; other apps/meetings can't hear your mic." ;;
+  esac
+  if [ -f "$f" ]; then
+    echo "  saved pre-test devices: input='$(sed -n 1p "$f")' output='$(sed -n 2p "$f")'"
+    echo "  → run 'autobot audio restore' to revert now."
+  fi
+}
+
+# Install BlackHole + switchaudio-osx via Homebrew if missing. Does NOT permanently
+# change your input — runs flip to BlackHole only for their duration and restore after.
+# A Multi-Output device (for monitoring playback) stays optional.
 # Returns 0 on success, 1 if anything failed.
 audio_install_loopback() {
   if ! command -v brew >/dev/null 2>&1; then
@@ -66,70 +171,58 @@ audio_install_loopback() {
     brew install switchaudio-osx || true
   fi
 
-  if command -v SwitchAudioSource >/dev/null 2>&1; then
-    if SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
-      echo ">> Setting BlackHole 2ch as default input..." >&2
-      SwitchAudioSource -t input -s "BlackHole 2ch" >/dev/null 2>&1 || true
-    else
-      echo "audio: BlackHole 2ch not visible to audio system yet — a reboot or logout/login may be needed." >&2
-    fi
+  if audio_have_switch && SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
+    echo "audio: BlackHole is installed and visible — voice testing is ready." >&2
+  else
+    echo "audio: BlackHole installed but not yet loaded by CoreAudio. Load it with:" >&2
+    echo "         sudo killall coreaudiod      # brief ~1s audio blip" >&2
+    echo "       or just log out and back in, then re-run 'autobot doctor'." >&2
   fi
 
   cat >&2 <<'EOF'
 
 ----------------------------------------------------------------
-Manual step still required (one-time, ~30s):
-
+Optional (only if you want to HEAR playback during a test):
   1. Open "Audio MIDI Setup" (Cmd-Space, type the name)
   2. Click + (bottom-left) → "Create Multi-Output Device"
-  3. Check both:
-       [x] BlackHole 2ch
-       [x] (your speakers / headphones — so you can still hear playback)
+  3. Check both: [x] BlackHole 2ch   [x] your speakers/headphones
   4. Save (no rename needed)
-  5. System Settings → Sound → Output → pick that Multi-Output Device
 
-This is needed so playback goes to BOTH BlackHole (sim hears it) AND your
-speakers (you can monitor it). Input is already set to BlackHole.
+autobot will use that Multi-Output device automatically if it exists. Without it,
+tests still work — output just routes to BlackHole and you won't hear playback.
 
-Then re-run `autobot doctor` — the audio line should turn good.
+Your normal mic/output are NOT changed by setup. autobot switches to BlackHole only
+during a voice test and restores your devices when it finishes
+(`autobot audio status` shows current routing; `autobot audio restore` reverts).
 ----------------------------------------------------------------
 EOF
   return 0
 }
 
-# Print a one-line status on whether BlackHole (or another loopback device)
-# is configured as the current default input. Returns 0 if input is plausibly
-# a loopback device, 1 otherwise.
+# Readiness check for voice testing: BlackHole installed + visible as an input device.
+# Also prints current routing and flags if you're currently stuck in test mode (#7).
+# Returns 0 if voice testing is ready, 1 otherwise.
 audio_doctor() {
-  local input_device
-  input_device=$(/usr/bin/python3 - <<'PY' 2>/dev/null || true
-import subprocess, re
-out = subprocess.run(
-    ["system_profiler", "SPAudioDataType"], capture_output=True, text=True
-).stdout
-# Find the device flagged as "Default Input Device: Yes"
-blocks = re.split(r"\n(?=    [A-Z])", out)
-for b in blocks:
-    if "Default Input Device: Yes" in b:
-        m = re.match(r"\s*([^\n:]+):", b)
-        if m: print(m.group(1).strip()); break
-PY
-)
-  if [ -z "$input_device" ]; then
-    echo "audio: could not detect default input device"
+  if ! audio_have_switch; then
+    echo "audio: SwitchAudioSource not installed — run 'autobot setup-audio' for voice tests"
     return 1
   fi
-  case "$input_device" in
-    *BlackHole*|*Loopback*|*Aggregate*|*VB-Cable*|*Soundflower*)
-      echo "audio: default input is '$input_device' (looks like a loopback device — good)"
-      return 0
-      ;;
-    *)
-      echo "audio: default input is '$input_device' (NOT a loopback device — the simulator mic will read live mic, not piped audio)"
-      echo "      install BlackHole and set it as the default input:"
-      echo "        brew install blackhole-2ch"
-      echo "        then System Settings > Sound > Input > BlackHole 2ch"
-      return 1
-      ;;
+  local cur_in cur_out
+  cur_in=$(audio_current_input); cur_out=$(audio_current_output)
+  echo "audio: current input='$cur_in' output='$cur_out'"
+  case "$cur_in" in
+    *BlackHole*) echo "audio: ⚠ input is BlackHole (autobot test mode) — meetings/other apps can't hear your mic; run 'autobot audio restore'" ;;
   esac
+  if SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
+    local multi; multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -i "multi-output" | head -1)
+    if [ -n "$multi" ]; then
+      echo "audio: BlackHole ready; Multi-Output '$multi' present (you'll hear playback during tests) — good"
+    else
+      echo "audio: BlackHole ready (no Multi-Output device — tests route output to BlackHole; you won't hear playback)"
+    fi
+    return 0
+  fi
+  echo "audio: BlackHole not visible as an input device — run 'autobot setup-audio'"
+  echo "      (if just installed, load the driver: sudo killall coreaudiod, or log out/in)"
+  return 1
 }
