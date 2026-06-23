@@ -4,7 +4,11 @@
 
 
 Visually sees and clicks through your web + ios apps using your existing Claude Code.
-Comes with smart memory and state tracking to mimic a smart QA tester stress testing your product to find bugs for you before you push to production.
+
+- Find bugs in your app
+- Smart memory 
+- State tracking
+- Mimics a QA tester stress testing your product
 
 Just plug it in your existing Claude Code, and AutoBot has a memory system + testing flows understanding of your app to test through it.
 
