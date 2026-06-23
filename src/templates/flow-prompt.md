@@ -10,6 +10,12 @@ yourself doing something repetitive.
 
 ## Your job
 
+0. **Read the app knowledge base first.** If the run context lists an "App knowledge base"
+   (`.autobot/CLAUDE.md`), read it before anything else. It holds app-specific gotchas,
+   rubric extensions, test data, and persisted user feedback for THIS app. Honor it
+   throughout: apply its gotchas while driving, use its test data/credentials, and fold its
+   rubric extensions into the critique pass below. If a flow step conflicts with it, the
+   knowledge base wins. (It may be absent — that's fine; skip this step if so.)
 1. **Read the test plan** at the path provided in the run context (`flowFile`).
 2. **Execute each step in order.** Interpret natural-language steps loosely — wording
    need not match exactly. If a step says "tap profile in top right", find the closest
@@ -77,7 +83,8 @@ move on. When ideas or budget run out, stop. Update the state graph as you go.
 
 Same as a full run:
 
-1. Walk this run's screenshots, apply `.autobot/critique-rubric.md`, append verdicts to
+1. Walk this run's screenshots, apply `.autobot/critique-rubric.md` **plus any
+   app-specific rubric extensions from `.autobot/CLAUDE.md`**, append verdicts to
    `critique.jsonl`, append warn/fail findings to `flaws.jsonl` (no duplicates of
    drive-time flaws). Include the cross-screen consistency check.
 2. Generate `report.html` in the run directory (self-contained, dark mode, no external

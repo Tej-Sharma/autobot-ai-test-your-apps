@@ -16,6 +16,7 @@ set -euo pipefail
 
 REPO_URL="${AUTOBOT_REPO_URL:-https://github.com/Tej-Sharma/autobot-ios-tester.git}"
 INSTALL_DIR="${AUTOBOT_INSTALL_DIR:-$HOME/.autobot}"
+BRANCH="${AUTOBOT_BRANCH:-development}"
 
 echo
 echo "═══ autobot bootstrap ═══"
@@ -33,13 +34,16 @@ if ! command -v brew >/dev/null 2>&1; then
   fi
 fi
 
-# 2. Clone or update the repo.
+# 2. Clone or update the repo. ~/.autobot is a managed copy — force it to match the
+# remote so an update can never get stuck on a dirty or divergent local checkout
+# (any local edits there are discarded; nobody should be editing ~/.autobot directly).
 if [ -d "$INSTALL_DIR/.git" ]; then
-  echo "→ Updating existing checkout at $INSTALL_DIR..."
-  git -C "$INSTALL_DIR" pull --ff-only
+  echo "→ Updating existing checkout at $INSTALL_DIR (forcing to origin/$BRANCH)..."
+  git -C "$INSTALL_DIR" fetch --depth 1 origin "$BRANCH"
+  git -C "$INSTALL_DIR" reset --hard FETCH_HEAD
 else
-  echo "→ Cloning $REPO_URL → $INSTALL_DIR..."
-  git clone --depth 1 "$REPO_URL" "$INSTALL_DIR"
+  echo "→ Cloning $REPO_URL (branch $BRANCH) → $INSTALL_DIR..."
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
 fi
 
 # 3. Run the in-CLI installer.

@@ -40,6 +40,26 @@ source "$AUTOBOT_HOME/src/lib/notify.sh"
 source "$AUTOBOT_HOME/src/lib/wizard.sh"
 source "$AUTOBOT_HOME/src/lib/install.sh"
 
+# Set by main() from a global `--work-dir <dir>` flag (or the AUTOBOT_WORK_DIR env).
+# When set, commands operate on <dir>/.autobot instead of the current directory.
+AUTOBOT_WORK_DIR="${AUTOBOT_WORK_DIR:-}"
+
+# cd into the directory whose .autobot/ this run should use, announcing the move when
+# it differs from $PWD. An explicit --work-dir / AUTOBOT_WORK_DIR always wins; otherwise
+# the caller's default is used. Creates the directory if needed.
+# Args: <default-work-dir>
+autobot_enter_work_dir() {
+  local default_dir="$1"
+  local target="${AUTOBOT_WORK_DIR:-$default_dir}"
+  [ -z "$target" ] && target="$(pwd)"
+  mkdir -p "$target"
+  target="$(cd "$target" && pwd)"
+  if [ "$target" != "$(pwd)" ]; then
+    echo ">> autobot state dir: $target/.autobot (use --work-dir to override)" >&2
+    cd "$target"
+  fi
+}
+
 usage() {
   cat <<EOF
 autobot — visual iOS QA driven by Claude Code + mobile-mcp
@@ -62,11 +82,17 @@ Usage:
   /path/to/MyApp.xcodeproj
   /path/to/MyApp.xcworkspace
   /path/to/MyApp.app            (pre-built simulator bundle)
+  /path/to/repo                 (a directory — autobot finds the build target inside)
+
+Options (append to any subcommand):
+  --work-dir <dir>        Put .autobot/ under <dir> instead of the current directory.
+                          (init auto-anchors to the app's own directory by default.)
 
 Env:
-  AUTOBOT_SIM_DEVICE      Simulator device name (default: "iPhone 15")
+  AUTOBOT_SIM_DEVICE      Pin a simulator name (default: auto — booted, else newest)
   AUTOBOT_SCHEME          xcodebuild scheme (default: first scheme found)
-  AUTOBOT_CLAUDE_MODEL    Claude model (default: claude-opus-4-7)
+  AUTOBOT_CLAUDE_MODEL    Claude model (default: claude-sonnet-4-6)
+  AUTOBOT_WORK_DIR        Same as --work-dir
 EOF
 }
 
@@ -201,6 +227,27 @@ cmd_init() {
   fi
   app_path="$(cd "$(dirname "$app_path")" && pwd)/$(basename "$app_path")"
 
+  # Anchor .autobot/ to the app itself (not wherever the user happened to be standing),
+  # so its memory lives with the code and is found again on the next run. --work-dir wins.
+  local anchor
+  case "$app_path" in
+    *.xcodeproj|*.xcworkspace) anchor="$(cd "$(dirname "$app_path")" && pwd)" ;;
+    *.app)                     anchor="$(pwd)" ;;   # prebuilt bundle: no source repo to anchor to
+    *) if [ -d "$app_path" ]; then anchor="$app_path"; else anchor="$(pwd)"; fi ;;
+  esac
+  autobot_enter_work_dir "$anchor"
+
+  # If a bare directory was given, auto-detect the buildable target inside it.
+  if [ -d "$app_path" ] && [[ "$app_path" != *.app ]]; then
+    local detected; detected=$(wizard_detect_app "$app_path")
+    if [ -z "$detected" ]; then
+      echo "ERR: no .xcodeproj / .xcworkspace / .app (or Flutter pubspec.yaml) found under $app_path" >&2
+      exit 1
+    fi
+    echo ">> Detected build target: $detected" >&2
+    app_path="$detected"
+  fi
+
   mkdir -p .autobot
   local run_id; run_id="$(date +%Y-%m-%d-%H%M%S)"
   local report_dir=".autobot/reports/$run_id"
@@ -209,7 +256,7 @@ cmd_init() {
   cat > .autobot/config.json <<EOF
 {
   "appInput": "$app_path",
-  "simDevice": "${AUTOBOT_SIM_DEVICE:-iPhone 15}"
+  "simDevice": "${AUTOBOT_SIM_DEVICE:-auto}"
 }
 EOF
 
@@ -261,6 +308,7 @@ cmd_attach() {
   if [ -z "$udid" ] || [ -z "$bundle_id" ]; then
     echo "ERR: autobot attach <udid> <bundle-id>" >&2; exit 1
   fi
+  autobot_enter_work_dir "$(pwd)"
 
   # Verify the sim is booted and the app is installed.
   # Note: capture to var first — pipefail + grep -q (early exit) causes SIGPIPE
@@ -343,6 +391,7 @@ cmd_flow() {
     echo "ERR: flow file not found: $flow_file" >&2; exit 1
   fi
   flow_file="$(cd "$(dirname "$flow_file")" && pwd)/$(basename "$flow_file")"
+  autobot_enter_work_dir "$(pwd)"
 
   local booted_list installed_apps
   booted_list=$(xcrun simctl list devices booted 2>/dev/null || true)
@@ -402,6 +451,7 @@ EOF
     echo "- Counter file: \`$counter_file\` (read current value, increment after use)"
     claude_run_context_paths "$report_dir"
     echo "- Critique rubric: \`.autobot/critique-rubric.md\`"
+    [ -f .autobot/CLAUDE.md ] && echo "- App knowledge base (READ FIRST — app-specific gotchas, rubric extensions, test data, persisted user feedback): \`.autobot/CLAUDE.md\`"
     echo "- Latest-report symlink to refresh: \`.autobot/reports/latest\` -> \`$run_id\`"
     echo "- Mode: flow (custom test plan)"
     echo
@@ -418,6 +468,7 @@ EOF
 }
 
 cmd_run() {
+  autobot_enter_work_dir "$(pwd)"
   if [ ! -f .autobot/config.json ]; then
     echo "ERR: no .autobot/config.json — run \`autobot init <app-path>\` first." >&2
     exit 1
@@ -458,6 +509,7 @@ cmd_run() {
 }
 
 cmd_wizard() {
+  autobot_enter_work_dir "$(pwd)"
   mkdir -p .autobot
   local result udid bundle_id
   result=$(wizard_run "$(pwd)")
@@ -474,6 +526,7 @@ cmd_wizard() {
 }
 
 cmd_go() {
+  autobot_enter_work_dir "$(pwd)"
   if [ ! -f .autobot/config.json ]; then
     echo "ERR: no .autobot/config.json — run \`autobot wizard\` first." >&2; exit 1
   fi
@@ -529,6 +582,17 @@ PY
 
 main() {
   local sub="${1:-help}"; shift || true
+  # Pull a global `--work-dir <dir>` (or --work-dir=<dir>) out of the remaining args,
+  # wherever it appears, so any subcommand can be redirected to another directory.
+  local -a rest=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --work-dir)   AUTOBOT_WORK_DIR="${2:-}"; shift 2 || shift ;;
+      --work-dir=*) AUTOBOT_WORK_DIR="${1#*=}"; shift ;;
+      *)            rest+=("$1"); shift ;;
+    esac
+  done
+  set -- ${rest[@]+"${rest[@]}"}
   case "$sub" in
     wizard) cmd_wizard ;;
     go)     cmd_go ;;

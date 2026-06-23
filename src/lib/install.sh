@@ -213,6 +213,50 @@ When the user asks for visual UI testing of an iOS app, run autobot.
   - \`.autobot/reports/latest/journal.jsonl\` — the full step trace
 - Surface the top high-severity flaws to the user (one line each, with the screenshot filename).
 
+## Persisting user feedback (do this every time)
+
+The test session is ephemeral — nothing said in this conversation carries to the next
+\`autobot run\`. The ONLY durable memory across runs is the target app's
+\`.autobot/CLAUDE.md\`. So whenever the user points anything out — a flaw to watch for, a
+new flow to test, "do this / don't do that," a preference, a correction, sample input —
+**write it into \`.autobot/CLAUDE.md\` automatically. Do NOT ask for confirmation.** Just
+save it as part of acting on it, so every future run of this app honors it.
+
+Memory is per-app, keyed by the app's own directory: each codebase has its OWN \`.autobot/\`
+(CLAUDE.md, flows, config, state-graph), created next to that app's code. autobot anchors
+\`.autobot/\` to the directory you invoke it from — so the app's directory IS the memory key.
+
+Because of that, ALWAYS run autobot from the app's repo root, and write feedback into THAT
+app's \`.autobot/CLAUDE.md\`:
+- If Claude Code was launched from somewhere OTHER than the app being tested, \`cd\` into the
+  app's directory first (the local path the user gave / where its \`.autobot/config.json\`
+  lives), then run autobot. This keeps memory living with the app, isolated, and committable.
+- NEVER run autobot for an app from a shared or transient folder (e.g. \`\$HOME\` or a generic
+  scratch dir): multiple apps would collide on one \`.autobot/\` (one config, one state-graph,
+  one CLAUDE.md), and feedback would be lost or cross-contaminated between apps.
+- For a remote URL or a prebuilt \`.app\` with no local source tree, pick ONE dedicated, stable
+  folder for that app and always return to it — that folder becomes the app's identity.
+- If the app's \`.autobot/CLAUDE.md\` doesn't exist yet, autobot's discovery/wizard seeds it
+  from the template before the first run — so the sections below will already be there.
+
+\`<target>\` below always means that resolved per-app directory — never the launch cwd if they
+differ.
+
+1. Write it into the right section of \`<target>/.autobot/CLAUDE.md\`:
+   - a flow / steps / ordering → \`## Critical flows\` (or the flow file \`.autobot/flows/main.md\`)
+   - a judging rule ("flag X", "ignore Y", brand color, tone of copy) → \`## App-specific rubric extensions\`
+   - a quirk to expect or ignore → \`## Known gotchas\`
+   - credentials / sample input / locale ("always test in Japanese") → \`## Test data\`
+     (use \`\${AUTOBOT_TEST_*}\` placeholders for secrets — never commit real ones)
+2. If it's ambiguous which section it belongs in, pick the best fit and store it anyway —
+   never block on the choice.
+3. After saving, just note in one line what you stored and where (a report, not a
+   question), e.g. "Saved to \`.autobot/CLAUDE.md\` → Known gotchas: 'ignore the double
+   pull-to-refresh'." Then carry on.
+
+This mirrors what the run pass already does with drift (it edits \`.autobot/CLAUDE.md\`) —
+you're doing the same for live user feedback, automatically.
+
 ## Voice / audio testing
 
 If the user's flow involves voice input (mic, dictation, voice assistant, audio call):
