@@ -97,7 +97,29 @@ audio_meeting_warning() {
   return 0
 }
 
-# Enter test mode: save devices, route input (and output) so the browser hears playback.
+# Name/UID of the stacked Multi-Output (real clock master + BlackHole) webbot creates.
+WEBBOT_MULTIOUT_NAME="${WEBBOT_MULTIOUT_NAME:-Webbot Loopback}"
+WEBBOT_MULTIOUT_UID="${WEBBOT_MULTIOUT_UID:-ai.webbot.multiout}"
+
+# Ensure a Multi-Output device exists that mixes a REAL output (clock master) + BlackHole,
+# and echo its name. Reuses any existing Multi-Output; else creates one via the CoreAudio
+# helper. Returns 1 (echoes nothing) if it can't — callers must NOT fall back to routing
+# output to BlackHole alone (the clockless-output crash trap on the iOS Simulator; on the
+# browser it's merely harmless, but we keep one safe path).
+audio_ensure_multiout() {
+  local existing
+  existing=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iE "multi-output" | head -1)
+  [ -z "$existing" ] && existing=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iF "$WEBBOT_MULTIOUT_NAME" | head -1)
+  [ -n "$existing" ] && { echo "$existing"; return 0; }
+  local helper="${WEBBOT_HOME:-}/src/lib/audio-multiout.swift"
+  command -v swift >/dev/null 2>&1 && [ -f "$helper" ] || return 1
+  local name; name=$(swift "$helper" create "$WEBBOT_MULTIOUT_NAME" "$WEBBOT_MULTIOUT_UID" 2>/dev/null) || return 1
+  [ -n "$name" ] && { echo "$name"; return 0; }
+  return 1
+}
+
+# Enter test mode: save devices, set input→BlackHole, route output through a Multi-Output
+# device (real clock master + BlackHole). Never routes output to BlackHole alone.
 # Returns 1 if loopback isn't available.
 audio_enter_test_mode() {
   audio_have_switch || { echo "audio: SwitchAudioSource not installed — run 'webbot setup-audio'." >&2; return 1; }
@@ -106,16 +128,16 @@ audio_enter_test_mode() {
     return 1
   fi
   audio_save
+  local multi; multi=$(audio_ensure_multiout)   # resolve before switching (real output = clock master)
   audio_set_input "BlackHole 2ch"
-  local multi
-  multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -i "multi-output" | head -1)
   if [ -n "$multi" ]; then
     audio_set_output "$multi"
+    echo "audio: test mode ON — input→BlackHole, output→'$multi' (real clock master + BlackHole)." >&2
   else
-    audio_set_output "BlackHole 2ch"
-    echo "audio: no Multi-Output device — routing output to BlackHole for the test (you won't hear playback)." >&2
+    echo "audio: ⚠ no Multi-Output device available — leaving your output unchanged (not routing to" >&2
+    echo "       BlackHole alone). The browser may not capture playback; run 'webbot setup-audio'." >&2
   fi
-  echo "audio: test mode ON — input→BlackHole. Devices restored when the run ends." >&2
+  echo "audio: devices restored when the run ends." >&2
 }
 
 audio_exit_test_mode() { audio_restore || true; }
@@ -131,6 +153,9 @@ audio_status() {
   echo "audio output: $out"
   case "$in" in
     *BlackHole*) echo "  ⚠ INPUT is BlackHole — webbot test mode is active; other apps/meetings can't hear your mic." ;;
+  esac
+  case "$out" in
+    *BlackHole\ 2ch) echo "  ⚠ OUTPUT is BlackHole ALONE — clockless; unstable for voice apps. Run 'webbot audio restore' (use a Multi-Output)." ;;
   esac
   if [ -f "$f" ]; then
     echo "  saved pre-test devices: input='$(sed -n 1p "$f")' output='$(sed -n 2p "$f")'"
@@ -158,22 +183,29 @@ audio_install_loopback() {
   command -v SwitchAudioSource >/dev/null 2>&1 || { echo ">> Installing switchaudio-osx..." >&2; brew install switchaudio-osx || true; }
 
   if audio_have_switch && SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
-    echo "audio: BlackHole is installed and visible — voice testing is ready." >&2
+    echo "audio: BlackHole is installed and visible." >&2
+    local multi; multi=$(audio_ensure_multiout)
+    if [ -n "$multi" ]; then
+      echo "audio: Multi-Output '$multi' ready (real clock master + BlackHole) — voice testing is ready." >&2
+    else
+      echo "audio: ⚠ could not create a Multi-Output device; voice runs will skip output routing." >&2
+    fi
   else
     echo "audio: BlackHole installed but not yet loaded by CoreAudio. Load it with:" >&2
     echo "         sudo killall coreaudiod      # brief ~1s audio blip" >&2
-    echo "       or log out and back in, then re-run 'webbot doctor'." >&2
+    echo "       or log out and back in, then re-run 'webbot setup-audio'." >&2
   fi
   cat >&2 <<'EOF'
 
 ----------------------------------------------------------------
-Optional (only to HEAR playback during a test): create a Multi-Output Device in
-"Audio MIDI Setup" containing BlackHole 2ch + your speakers. webbot uses it if present;
-without it, tests still work (output routes to BlackHole, you just won't hear playback).
+webbot routes a voice test's audio through a Multi-Output device that mixes your real
+output (its hardware clock keeps audio engines stable) with BlackHole (so the browser's
+getUserMedia hears the playback). It is created automatically and selected only during a
+voice run; your normal mic/output are restored afterward. Output is never routed to
+BlackHole alone (clockless — crashes clock-sensitive voice apps on the iOS Simulator,
+and is the safe default here too).
 
-Your normal mic/output are NOT changed by setup. webbot switches to BlackHole only
-during a voice test and restores your devices when it finishes
-(`webbot audio status` shows routing; `webbot audio restore` reverts).
+`webbot audio status` shows routing; `webbot audio restore` reverts.
 ----------------------------------------------------------------
 EOF
   return 0
@@ -192,8 +224,17 @@ audio_doctor() {
   case "$cur_in" in
     *BlackHole*) echo "audio: ⚠ input is BlackHole (webbot test mode) — meetings/other apps can't hear your mic; run 'webbot audio restore'" ;;
   esac
+  case "$cur_out" in
+    *BlackHole\ 2ch) echo "audio: ⚠ output is BlackHole ALONE — clockless; unstable for voice apps. Run 'webbot audio restore'." ;;
+  esac
   if SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
-    echo "audio: BlackHole ready for voice input testing"
+    local multi; multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iE "multi-output" | head -1)
+    [ -z "$multi" ] && multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iF "$WEBBOT_MULTIOUT_NAME" | head -1)
+    if [ -n "$multi" ]; then
+      echo "audio: BlackHole ready; Multi-Output '$multi' present (real clock master + BlackHole) — good"
+    else
+      echo "audio: BlackHole ready; Multi-Output will be auto-created on first voice run ('webbot setup-audio' to create it now)"
+    fi
     return 0
   fi
   echo "audio: BlackHole not visible — run 'webbot setup-audio' (if just installed: sudo killall coreaudiod, or log out/in)"

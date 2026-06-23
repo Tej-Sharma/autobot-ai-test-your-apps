@@ -102,9 +102,30 @@ audio_meeting_warning() {
   return 0
 }
 
-# Enter test mode: save devices, route input (and output) so the sim hears playback.
-# Prefers a Multi-Output device (so you can still monitor); else routes output straight
-# to BlackHole (sim hears it, you won't). Returns 1 if loopback isn't available.
+# Name/UID of the stacked Multi-Output (real clock master + BlackHole) autobot creates.
+AUTOBOT_MULTIOUT_NAME="${AUTOBOT_MULTIOUT_NAME:-Autobot Loopback}"
+AUTOBOT_MULTIOUT_UID="${AUTOBOT_MULTIOUT_UID:-ai.autobot.multiout}"
+
+# Ensure a Multi-Output device exists that mixes a REAL output (clock master) + BlackHole,
+# and echo its name. Reuses any existing Multi-Output; else creates one via the CoreAudio
+# helper. Returns 1 (echoes nothing) if it can't — callers must NOT fall back to routing
+# output to BlackHole alone (that's the SIGABRT trap on clock-sensitive voice apps).
+audio_ensure_multiout() {
+  local existing
+  existing=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iE "multi-output" | head -1)
+  [ -z "$existing" ] && existing=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iF "$AUTOBOT_MULTIOUT_NAME" | head -1)
+  [ -n "$existing" ] && { echo "$existing"; return 0; }
+  local helper="${AUTOBOT_HOME:-}/src/lib/audio-multiout.swift"
+  command -v swift >/dev/null 2>&1 && [ -f "$helper" ] || return 1
+  local name; name=$(swift "$helper" create "$AUTOBOT_MULTIOUT_NAME" "$AUTOBOT_MULTIOUT_UID" 2>/dev/null) || return 1
+  [ -n "$name" ] && { echo "$name"; return 0; }
+  return 1
+}
+
+# Enter test mode: save devices, set input→BlackHole, and route output through a
+# Multi-Output device (real clock master + BlackHole). NEVER route output to BlackHole
+# alone — BlackHole is clockless and the Simulator's AURemoteIO aborts (SIGABRT) on
+# clock-sensitive (VPIO/.voiceChat) voice apps. Returns 1 if loopback isn't available.
 audio_enter_test_mode() {
   audio_have_switch || { echo "audio: SwitchAudioSource not installed — run 'autobot setup-audio'." >&2; return 1; }
   if ! SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
@@ -112,16 +133,19 @@ audio_enter_test_mode() {
     return 1
   fi
   audio_save
+  # Resolve the Multi-Output BEFORE switching anything, so the current real output can
+  # serve as the aggregate's hardware clock master.
+  local multi; multi=$(audio_ensure_multiout)
   audio_set_input "BlackHole 2ch"
-  local multi
-  multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -i "multi-output" | head -1)
   if [ -n "$multi" ]; then
     audio_set_output "$multi"
+    echo "audio: test mode ON — input→BlackHole, output→'$multi' (real clock master + BlackHole)." >&2
   else
-    audio_set_output "BlackHole 2ch"
-    echo "audio: no Multi-Output device — routing output to BlackHole for the test (you won't hear playback)." >&2
+    echo "audio: ⚠ could not set up a Multi-Output device — leaving your output device unchanged." >&2
+    echo "       (Refusing to route output to BlackHole alone: it crashes voice apps on the sim.)" >&2
+    echo "       The sim may not capture playback; run 'autobot setup-audio' to fix." >&2
   fi
-  echo "audio: test mode ON — input→BlackHole. Devices will be restored when the run ends." >&2
+  echo "audio: devices will be restored when the run ends." >&2
 }
 
 # Leave test mode (alias for restore, used by traps / 'audio off').
@@ -139,16 +163,19 @@ audio_status() {
   case "$in" in
     *BlackHole*) echo "  ⚠ INPUT is BlackHole — autobot test mode is active; other apps/meetings can't hear your mic." ;;
   esac
+  case "$out" in
+    *BlackHole\ 2ch) echo "  ⚠ OUTPUT is BlackHole ALONE — clockless; this crashes voice apps on the Simulator. Run 'autobot audio restore' (use a Multi-Output instead)." ;;
+  esac
   if [ -f "$f" ]; then
     echo "  saved pre-test devices: input='$(sed -n 1p "$f")' output='$(sed -n 2p "$f")'"
     echo "  → run 'autobot audio restore' to revert now."
   fi
 }
 
-# Install BlackHole + switchaudio-osx via Homebrew if missing. Does NOT permanently
-# change your input — runs flip to BlackHole only for their duration and restore after.
-# A Multi-Output device (for monitoring playback) stays optional.
-# Returns 0 on success, 1 if anything failed.
+# Install BlackHole + switchaudio-osx via Homebrew if missing, and auto-create the
+# Multi-Output device (real clock master + BlackHole) that voice runs route through.
+# Does NOT permanently change your devices — runs flip to BlackHole/Multi-Output only
+# for their duration and restore after. Returns 0 on success, 1 if anything failed.
 audio_install_loopback() {
   if ! command -v brew >/dev/null 2>&1; then
     echo "audio: Homebrew is required to auto-install BlackHole." >&2
@@ -172,28 +199,36 @@ audio_install_loopback() {
   fi
 
   if audio_have_switch && SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
-    echo "audio: BlackHole is installed and visible — voice testing is ready." >&2
+    echo "audio: BlackHole is installed and visible." >&2
+    local multi; multi=$(audio_ensure_multiout)
+    if [ -n "$multi" ]; then
+      echo "audio: Multi-Output '$multi' ready (real clock master + BlackHole) — voice testing is ready." >&2
+    else
+      echo "audio: ⚠ could not create a Multi-Output device. Voice runs will skip output routing" >&2
+      echo "       (rather than route to BlackHole alone, which crashes voice apps on the sim)." >&2
+    fi
   else
     echo "audio: BlackHole installed but not yet loaded by CoreAudio. Load it with:" >&2
     echo "         sudo killall coreaudiod      # brief ~1s audio blip" >&2
-    echo "       or just log out and back in, then re-run 'autobot doctor'." >&2
+    echo "       or just log out and back in, then re-run 'autobot setup-audio'." >&2
   fi
 
   cat >&2 <<'EOF'
 
 ----------------------------------------------------------------
-Optional (only if you want to HEAR playback during a test):
-  1. Open "Audio MIDI Setup" (Cmd-Space, type the name)
-  2. Click + (bottom-left) → "Create Multi-Output Device"
-  3. Check both: [x] BlackHole 2ch   [x] your speakers/headphones
-  4. Save (no rename needed)
+How voice testing routes audio (and why):
 
-autobot will use that Multi-Output device automatically if it exists. Without it,
-tests still work — output just routes to BlackHole and you won't hear playback.
+autobot sends a voice test's playback through a Multi-Output device that mixes your real
+output device (whose hardware clock keeps the Simulator's audio engine stable) with
+BlackHole (so the sim's microphone hears the playback). This device is created
+automatically and selected ONLY during a voice run; your normal mic/output are restored
+when the run ends.
 
-Your normal mic/output are NOT changed by setup. autobot switches to BlackHole only
-during a voice test and restores your devices when it finishes
-(`autobot audio status` shows current routing; `autobot audio restore` reverts).
+It deliberately never routes output to BlackHole *alone*: BlackHole is clockless, and the
+Simulator's AURemoteIO aborts (SIGABRT) on clock-sensitive voice apps (VPIO / .voiceChat /
+real-time interpretation) when the only output clock is a clockless device.
+
+`autobot audio status` shows current routing; `autobot audio restore` reverts.
 ----------------------------------------------------------------
 EOF
   return 0
@@ -213,12 +248,16 @@ audio_doctor() {
   case "$cur_in" in
     *BlackHole*) echo "audio: ⚠ input is BlackHole (autobot test mode) — meetings/other apps can't hear your mic; run 'autobot audio restore'" ;;
   esac
+  case "$cur_out" in
+    *BlackHole\ 2ch) echo "audio: ⚠ output is BlackHole ALONE — clockless; crashes voice apps on the Simulator. Run 'autobot audio restore'." ;;
+  esac
   if SwitchAudioSource -a -t input 2>/dev/null | grep -q "BlackHole 2ch"; then
-    local multi; multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -i "multi-output" | head -1)
+    local multi; multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iE "multi-output" | head -1)
+    [ -z "$multi" ] && multi=$(SwitchAudioSource -a -t output 2>/dev/null | grep -iF "$AUTOBOT_MULTIOUT_NAME" | head -1)
     if [ -n "$multi" ]; then
-      echo "audio: BlackHole ready; Multi-Output '$multi' present (you'll hear playback during tests) — good"
+      echo "audio: BlackHole ready; Multi-Output '$multi' present (real clock master + BlackHole) — good"
     else
-      echo "audio: BlackHole ready (no Multi-Output device — tests route output to BlackHole; you won't hear playback)"
+      echo "audio: BlackHole ready; Multi-Output will be auto-created on first voice run ('autobot setup-audio' to create it now)"
     fi
     return 0
   fi
