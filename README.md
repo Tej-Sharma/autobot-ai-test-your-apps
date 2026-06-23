@@ -17,12 +17,12 @@ Just plug it in your existing Claude Code, and AutoBot has a memory system + tes
 
 **iOS tester (autobot)** — run in a terminal:
 ```
-curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ai-test-your-apps/development/install.sh | bash
 ```
 
 **Web tester (webbot)** — run in a terminal:
 ```
-curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ios-tester/development/web/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ai-test-your-apps/development/web/install.sh | bash
 ```
 
 Then open Claude Code and give it the location of your projects:

@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-REPO_URL="${AUTOBOT_REPO_URL:-https://github.com/Tej-Sharma/autobot-ios-tester.git}"
+REPO_URL="${AUTOBOT_REPO_URL:-https://github.com/Tej-Sharma/autobot-ai-test-your-apps.git}"
 INSTALL_DIR="${AUTOBOT_INSTALL_DIR:-$HOME/.autobot}"
 BRANCH="${AUTOBOT_BRANCH:-development}"
 
