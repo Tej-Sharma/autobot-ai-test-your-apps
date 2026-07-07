@@ -12,7 +12,78 @@ it hit, screenshot attached.
 - **Grounded, not vibes.** Every flaw and every "flow completed" claim is logged with the exact screenshot that proves it.
 - **One brain, two hands.** The same exploration loop drives both platforms — only the "hands" (mobile-mcp vs. Playwright) differ.
 
-## Get started (60 seconds)
+## Installation
+
+Two ways to run it — pick based on what you have available:
+
+### Option 1 — Most Powerful + Fastest (`v2-engine`, direct)
+
+Runs the new single-brain explore loop directly against a model over OpenRouter
+(default `google/gemini-3.5-flash`) — no Claude Code CLI in the loop, so each
+step is one fast API call instead of a Claude Code turn.
+
+1. Clone the repo and install the engine's dependencies:
+   ```bash
+   git clone https://github.com/Tej-Sharma/selfloop.git
+   cd selfloop/v2-engine
+   npm install
+   ```
+
+2. **Web only** — one-time browser install:
+   ```bash
+   npm run setup:web
+   ```
+
+3. Get an [OpenRouter API key](https://openrouter.ai/keys) and export it:
+   ```bash
+   export OPENROUTER_API_KEY="sk-or-..."
+   ```
+
+4. Describe your target app in an inputs file (gitignored — this is where credentials live).
+
+   **Web** — `web/inputs/my-app.json`:
+   ```bash
+   mkdir -p web/inputs
+   cat > web/inputs/my-app.json <<'EOF'
+   {
+     "url": "https://my-app.example.com",
+     "credentials": { "username": "demo", "password": "demo" },
+     "about": "One line description of what the app does."
+   }
+   EOF
+   ```
+
+   **iOS** — build and install your app on a booted Simulator first (same as
+   you'd do from Xcode), grab its UDID, then write `mobile/inputs/<bundle-id>.json`:
+   ```bash
+   xcrun simctl list devices | grep Booted   # copy the UDID
+
+   mkdir -p mobile/inputs
+   cat > mobile/inputs/com.your.bundleid.json <<'EOF'
+   {
+     "credentials": { "username": "demo", "password": "demo" },
+     "notes": "Log in, then explore every tab.",
+     "deviceUdid": "YOUR-SIMULATOR-UDID"
+   }
+   EOF
+   ```
+
+5. Run it — explore, critique, design-check, and report in one shot:
+   ```bash
+   npm run test-app:web
+   # or:
+   DEVICE=YOUR-SIMULATOR-UDID npm run test-app:mobile com.your.bundleid
+   ```
+
+6. Open the report:
+   ```bash
+   open web/runs/my-app__explore__*/report.html
+   ```
+
+### Option 2 — Powerful but Slower (Claude Code CLI)
+
+Drives the app through your existing Claude Code subscription instead of an
+API key — no OpenRouter account needed, but slower per step than Option 1.
 
 **iOS tester (selfloop):**
 ```bash
