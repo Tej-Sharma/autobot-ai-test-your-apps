@@ -1,4 +1,4 @@
-# autobot - automatically test your web + mobile apps
+# selfloop - automatically test your web + mobile apps
 
 <img width="729" height="442" alt="CleanShot 2026-06-22 at 19 11 38" src="https://github.com/user-attachments/assets/aaf6d643-b548-4bfb-9dec-3877d6bb6e1a" />
 
@@ -14,23 +14,23 @@ it hit, screenshot attached.
 
 ## Get started (60 seconds)
 
-**iOS tester (autobot):**
+**iOS tester (selfloop):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ai-test-your-apps/development/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/selfloop-ai-test-your-apps/development/install.sh | bash
 ```
 
 **Web tester (webbot):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ai-test-your-apps/development/web/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/selfloop-ai-test-your-apps/development/web/install.sh | bash
 ```
 
 Then, in Claude Code:
 ```
-test my ios app using the autobot skill
+test my ios app using the selfloop skill
 test my web app using the webbot skill
 ```
 
-📦 Prefer a hosted, always-on tester instead of running it locally? [Get it here](https://autobot.it.com/)
+📦 Prefer a hosted, always-on tester instead of running it locally? [Get it here](https://selfloop.it.com/)
 
 ---
 
@@ -125,7 +125,7 @@ the run mid-way and the record up to the last step is still complete:
 
 ## Platform differences (same core, different hands)
 
-| | iOS (autobot) | Web (webbot) |
+| | iOS (selfloop) | Web (webbot) |
 |---|---|---|
 | Driver | mobile-mcp → iOS Simulator | Playwright MCP → real browser |
 | Actions | tap, type, swipe, relaunch, speak | click, type, navigate(url), back |
@@ -176,8 +176,8 @@ ios-tester/
 │   ├── core/                   explore loop, prompts, schemas, state graph — written once
 │   ├── mobile/                 iOS driver (mobile-mcp) + platform files
 │   └── web/                    web driver (Playwright MCP) + platform files
-├── bin/autobot                ← iOS CLI entry (bash) — installs, boots the sim, invokes Claude Code
-├── web/bin/webbot              ← web CLI entry (bash), same shape as bin/autobot
+├── bin/selfloop                ← iOS CLI entry (bash) — installs, boots the sim, invokes Claude Code
+├── web/bin/webbot              ← web CLI entry (bash), same shape as bin/selfloop
 ├── src/{lib,templates}         ← simctl/xcodebuild helpers, prompt templates (iOS CLI)
 ├── web/src/{lib,templates}     ← Playwright MCP plumbing, prompt templates (web CLI)
 └── install.sh / web/install.sh ← curl-target installers
@@ -190,6 +190,6 @@ containing `journal.jsonl`, `flaws.jsonl`, `flows.jsonl`, `memory.jsonl`,
 ## Status
 
 v2 engine (`v2-engine/`) is the actively developed core, already validated
-against apps with planted bugs. The bash CLIs (`bin/autobot`, `web/bin/webbot`)
+against apps with planted bugs. The bash CLIs (`bin/selfloop`, `web/bin/webbot`)
 are the current install path for Claude Code users; a hosted version is at
-[autobot.it.com](https://autobot.it.com/).
+[selfloop.it.com](https://selfloop.it.com/).
