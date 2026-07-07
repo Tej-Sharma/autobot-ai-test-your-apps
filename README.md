@@ -1,6 +1,7 @@
 # selfloop - automatically test your web + mobile apps
 
-<img width="729" height="442" alt="CleanShot 2026-06-22 at 19 11 38" src="https://github.com/user-attachments/assets/aaf6d643-b548-4bfb-9dec-3877d6bb6e1a" />
+<img width="180" height="391" alt="image" src="https://github.com/user-attachments/assets/be15aa7a-8ad5-4db3-b44a-ceeb575dd10c" />
+
 
 Point it at your iOS app or your web app. It drives the simulator or a real
 browser like a human tester would — tapping around, filling forms, trying the
