@@ -1,4 +1,4 @@
-# autobot - automatically test your web + mobile apps
+# selfloop - automatically test your web + mobile apps
 
 <img width="729" height="442" alt="CleanShot 2026-06-22 at 19 11 38" src="https://github.com/user-attachments/assets/aaf6d643-b548-4bfb-9dec-3877d6bb6e1a" />
 
@@ -10,30 +10,30 @@ Visually sees and clicks through your web + ios apps using your existing Claude 
 - State tracking
 - Mimics a QA tester stress testing your product
 
-Just plug it in your existing Claude Code, and AutoBot has a memory system + testing flows understanding of your app to test through it.
+Just plug it in your existing Claude Code, and selfloop has a memory system + testing flows understanding of your app to test through it.
 
 
 ## Installation
 
-**iOS tester (autobot)** — run in a terminal:
+**iOS tester (selfloop)** — run in a terminal:
 ```
-curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ai-test-your-apps/development/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/selfloop-ai-test-your-apps/development/install.sh | bash
 ```
 
 **Web tester (webbot)** — run in a terminal:
 ```
-curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/autobot-ai-test-your-apps/development/web/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/Tej-Sharma/selfloop-ai-test-your-apps/development/web/install.sh | bash
 ```
 
 Then open Claude Code and give it the location of your projects:
-- `test my ios app using the autobot skill`
+- `test my ios app using the selfloop skill`
 - `test my web app using the webbot skill`
 
 ## Test Your Products before Merging PRs, Pushing to Production, or In Production
 
 A cloud-hosted tester that is routinely fully testing your web and mobile apps to ensure none of your users are hitting bugs that will hurt your company's reputation.
 
-📦 [Get It Here](https://autobot.it.com/)
+📦 [Get It Here](https://selfloop.it.com/)
 
 ## Status
 
@@ -50,7 +50,7 @@ The split matters: driving is expensive and stateful; critique is cheap, statele
 
 ## The memory system: journals + a coverage map, written as the run happens
 
-autobot deliberately does **not** rely on long context. Everything is externalized to
+selfloop deliberately does **not** rely on long context. Everything is externalized to
 disk, incrementally — kill the run at any point and the record is complete up to the
 last step. (This is the same journal-based system the sibling [webbot](web/) uses,
 adapted for iOS.)
@@ -99,13 +99,13 @@ not batched at the end — so a killed or crashed run still has a complete recor
 
 This is the one place the web approach **doesn't** port. On the web (webbot) every
 screen has a URL, so returning to a prior state is a single `navigate` call and
-console/network errors are free evidence after every step. iOS has neither — so autobot
+console/network errors are free evidence after every step. iOS has neither — so selfloop
 adapts:
 
 ```
    web (webbot):   browser_navigate("/settings")        ← one call, instant
    ───────────────────────────────────────────────────────────────────────
-   iOS (autobot):  mobile_launch_app(bundleId)          ← relaunch …
+   iOS (selfloop):  mobile_launch_app(bundleId)          ← relaunch …
                        │
                        ▼   then re-walk the node's stored `reach` path:
                    "launch → tap Settings tab → tap Account"
@@ -144,29 +144,29 @@ Simulator-only in v1. Real device support is v2.
 
 ```bash
 # Discover flows for a target app
-./bin/autobot init /path/to/MyApp.xcodeproj
+./bin/selfloop init /path/to/MyApp.xcodeproj
 
-# After discovery, autobot writes:
-#   ./.autobot/CLAUDE.md             ← discovered flows + critique rubric
-#   ./.autobot/reports/<timestamp>/  ← discovery screenshots
+# After discovery, selfloop writes:
+#   ./.selfloop/CLAUDE.md             ← discovered flows + critique rubric
+#   ./.selfloop/reports/<timestamp>/  ← discovery screenshots
 
 # Re-run flows on the current build (e.g. after a PR)
-./bin/autobot run
+./bin/selfloop run
 
 # Open the report
-open ./.autobot/reports/latest/report.html
+open ./.selfloop/reports/latest/report.html
 ```
 
 ## Project layout
 
 ```
 ios-tester/
-├── bin/autobot              ← iOS CLI entry (bash)
+├── bin/selfloop              ← iOS CLI entry (bash)
 ├── src/
 │   ├── lib/                  ← simctl, xcodebuild, claude spawn helpers
 │   └── templates/            ← prompt + config templates
 ├── tasks/                    ← todo.md, lessons.md
-├── examples/                 ← sample .autobot/ outputs
+├── examples/                 ← sample .selfloop/ outputs
 ├── install.sh               ← iOS tester installer (curl target)
 └── web/                     ← webbot: the web-app tester (self-contained)
     ├── bin/webbot            ← web CLI entry (bash)
@@ -174,11 +174,11 @@ ios-tester/
     └── install.sh            ← web tester installer (separate curl target)
 ```
 
-In a target app's repo, `autobot init` creates:
+In a target app's repo, `selfloop init` creates:
 
 ```
 <target-repo>/
-└── .autobot/
+└── .selfloop/
     ├── CLAUDE.md             ← discovered flows (prose, editable — the source of truth)
     ├── critique-rubric.md    ← UX rubric (extend it per-app)
     ├── .mcp.json             ← mobile-mcp config
