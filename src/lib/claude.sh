@@ -186,3 +186,49 @@ claude_run() {
       < "$prompt_file"
   )
 }
+
+# Run the critique pass in a FRESH claude process — no mobile-mcp, no simulator, no WDA.
+# The drive pass already wrote the journals + screenshots to disk; this process reads
+# those PNGs and writes report.html. Splitting it off keeps the drive transcript (and
+# its inline screenshots) out of the critique context, so the heaviest moment of the run
+# starts clean instead of on top of the whole drive history.
+# Args: <prompt-file> <work-dir>
+claude_run_critique() {
+  local prompt_file="$1" work_dir="$2"
+  local model="${AUTOBOT_CLAUDE_MODEL:-claude-sonnet-4-6}"
+
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "ERR: claude CLI not found on PATH. Install Claude Code first." >&2
+    exit 1
+  fi
+
+  local timeout_s="${AUTOBOT_CRITIQUE_TIMEOUT_SECONDS:-900}"
+  local budget_usd="${AUTOBOT_CRITIQUE_MAX_BUDGET_USD:-5}"
+
+  local -a timeout_cmd
+  if command -v gtimeout >/dev/null 2>&1; then
+    timeout_cmd=(gtimeout "$timeout_s")
+  elif command -v timeout >/dev/null 2>&1; then
+    timeout_cmd=(timeout "$timeout_s")
+  else
+    timeout_cmd=(perl -e 'alarm shift; exec @ARGV' "$timeout_s")
+  fi
+
+  (
+    cd "$work_dir"
+    # No --mcp-config: the critique pass needs no simulator. --strict-mcp-config with no
+    # config means zero MCP servers. Tools: file ops + Bash only (it reads PNGs, appends
+    # JSONL, writes report.html).
+    "${timeout_cmd[@]}" claude \
+      --print \
+      --model "$model" \
+      --strict-mcp-config \
+      --permission-mode bypassPermissions \
+      --max-budget-usd "$budget_usd" \
+      --allowedTools "Bash" "Read" "Write" "Edit" "Glob" "Grep" \
+      --output-format stream-json \
+      --include-partial-messages \
+      --verbose \
+      < "$prompt_file"
+  )
+}

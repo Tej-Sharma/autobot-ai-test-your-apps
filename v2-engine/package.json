@@ -1,0 +1,34 @@
+{
+  "name": "v2-engine",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Unified QA engine: shared explore/critique/annotate core + mobile (mobile-mcp) and web (Playwright MCP) drivers.",
+  "scripts": {
+    "setup:web": "npx -y playwright install chromium",
+    "explore:mobile": "node --env-file=../v2-mobile-tester/spike/.env mobile/explore.mjs",
+    "explore:web": "node --env-file=../v2-mobile-tester/spike/.env web/explore.mjs",
+    "critique:mobile": "node --env-file=../v2-mobile-tester/spike/.env mobile/critique.mjs",
+    "critique:web": "node --env-file=../v2-mobile-tester/spike/.env web/critique.mjs",
+    "design:mobile": "node --env-file=../v2-mobile-tester/spike/.env mobile/design.mjs",
+    "design:web": "node --env-file=../v2-mobile-tester/spike/.env web/design.mjs",
+    "annotate:mobile": "node mobile/annotate.mjs",
+    "annotate:web": "node web/annotate.mjs",
+    "report:mobile": "node mobile/report.mjs",
+    "report:web": "node web/report.mjs",
+    "drive:mobile": "node --env-file=../v2-mobile-tester/spike/.env mobile/alternate-dfs-app-traversal.mjs",
+    "drive:web": "node --env-file=../v2-mobile-tester/spike/.env web/drive.mjs",
+    "test-app:mobile": "node --env-file=../v2-mobile-tester/spike/.env mobile/explore.mjs && { node --env-file=../v2-mobile-tester/spike/.env mobile/critique.mjs; node --env-file=../v2-mobile-tester/spike/.env mobile/design.mjs; node mobile/annotate.mjs; node mobile/report.mjs; }",
+    "test-app:web": "node --env-file=../v2-mobile-tester/spike/.env web/explore.mjs && { node --env-file=../v2-mobile-tester/spike/.env web/critique.mjs; node --env-file=../v2-mobile-tester/spike/.env web/design.mjs; node web/annotate.mjs; node web/report.mjs; }",
+    "parity": "node parity/check.mjs"
+  },
+  "dependencies": {
+    "@mobilenext/mobile-mcp": "^0.0.61",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@openrouter/ai-sdk-provider": "^1.0.0",
+    "@playwright/mcp": "^0.0.77",
+    "ai": "^5.0.0",
+    "sharp": "^0.33.5",
+    "zod": "^3.23.0"
+  }
+}

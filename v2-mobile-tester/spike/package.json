@@ -1,0 +1,17 @@
+{
+  "name": "v2-drive-spike",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Go/no-go spike: drive the iOS simulator with a fast vision model via the Vercel AI SDK + mobile-mcp.",
+  "scripts": {
+    "spike": "node --env-file=.env spike.mjs"
+  },
+  "dependencies": {
+    "ai": "^5.0.0",
+    "@ai-sdk/google": "^2.0.0",
+    "@openrouter/ai-sdk-provider": "^1.0.0",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "zod": "^3.23.0"
+  }
+}

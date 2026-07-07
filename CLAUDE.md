@@ -70,6 +70,49 @@ For higher-quality voices: macOS Settings → Accessibility → Spoken Content �
 - `src/templates/critique-rubric.md` — UX checklist used by critique pass
 - `src/templates/app-CLAUDE.md` — template written into `<target>/.autobot/CLAUDE.md` after discovery
 
+## v2 (`v2-engine/`) — ONE engine tree, explore is the default brain
+
+**`v2-engine/` is the canonical v2 engine** — shared core + platform drivers:
+
+- `v2-engine/core/` — everything platform-independent, written ONCE: the explore
+  loop (`runExplore(driver, cfg)`), the exploration doctrine + prompt skeletons
+  (`prompts.mjs` — platform text is injected as slots), the schema builders,
+  generic state-graph ops, and the critique/annotate passes.
+- `v2-engine/mobile/`, `v2-engine/web/` — the "hands": each has `driver.mjs`
+  (observe/execute/recover against mobile-mcp or Playwright MCP), `prompts.mjs`
+  (slot fills only), `schema.mjs` (action vocabulary + flaw types), platform
+  stategraph identity/controls, plus verbatim platform files (mcp.mjs,
+  interactions.mjs, report.mjs, rubric.md). Same entrypoint names in both:
+  `explore.mjs` / `critique.mjs` / `annotate.mjs` / `report.mjs` — so the desktop
+  app selects an engine purely by `engineDir(platform)` → `v2-engine/<platform>`.
+- CLI: `cd v2-engine && npm run test-app:mobile` / `npm run test-app:web`.
+- `v2-engine/parity/check.mjs` (`npm run parity`) proves output-equivalence with
+  the frozen pre-split engines: byte-identical prompts across a fixture grid,
+  structurally identical TURN/FLAW schemas, identical renderers/stategraph.
+  Run it after ANY edit to core/prompts.mjs or the platform slot text.
+- The old `v2-mobile-tester/engine/` and `v2-web-tester/engine/` dirs are FROZEN
+  reference copies (they are untracked, so they're also the only backup of the
+  pre-split code) — don't develop in them; edit `v2-engine/` instead.
+
+The v2 engine has two drive brains. **Always use `explore.mjs` — for everything**:
+the CLI, the desktop app, and any new surface.
+`alternate-dfs-app-traversal.mjs` (formerly `drive.mjs`; deterministic frontier/DFS
+walk, model only judges — still `drive.mjs` on the web side) is legacy — keep it
+working but don't wire it into anything new.
+
+`explore.mjs` is the single-brain LLM explorer: one model call per turn that judges
+the previous action's outcome AND picks the next action, with the full never-pruned
+memory trace (`memory.jsonl`) fed back each turn. It's what implements the intended
+testing behavior: core features first, the mandatory settings↔features retest rule,
+goal tracking (`goalsSoFar`/`goalsCompleted`/`areasRemaining`), and backtracking with
+full memory of everything done. The web driver differs where the platform does:
+ref-based clicks, `navigate(url)` as a first-class action, browser back, and
+per-step console/network error signals.
+
+Pipeline stays: explore → critique → annotate → report. Explore writes the same run
+artifacts as drive (journal/flaws/screenshots) plus `memory.jsonl`, so all downstream
+stages work unchanged.
+
 ## The journal-based memory system
 
 The drive agent does **not** rely on long context — every bit of run state is
@@ -93,6 +136,22 @@ console/network check becomes **crash + visible-error detection**. The CLI seeds
 files per run via `claude_seed_run_dir` and points the agent at them via
 `claude_run_context_paths` (both in `src/lib/claude.sh`).
 
+## docs/ — separate repo, auto-committed
+
+`docs/` is **gitignored by this repo** and is its own standalone git repository,
+pointed at `https://github.com/Constella-OS/autobot-docs.git` (private). It holds
+design notes and decision trees (e.g. `figma-visual-difference.md`), not product code.
+
+**On every change to anything under `docs/`, commit and push it to its own origin on
+`main`** — don't leave it uncommitted:
+
+```bash
+cd docs && git add -A && git commit -m "<what changed>" && git push origin main
+```
+
+This is the docs repo's remote, not the autobot repo's. The parent repo never tracks
+`docs/`.
+
 ## Conventions
 
 - Bash with `set -euo pipefail`
@@ -101,6 +160,20 @@ files per run via `claude_seed_run_dir` and points the agent at them via
 - Flow definitions: prose paragraphs inside the target's `.autobot/CLAUDE.md` — not YAML, because Claude reads natural language better than it parses structured DSLs
 - Critique rubric: editable markdown — users can extend it per-app
 - Journals: append-only JSONL, written as the run happens (never batched at the end)
+
+## Releasing the desktop app (`v2-mobile-tester/app`)
+
+- Bump `version` in `v2-mobile-tester/app/package.json`, then
+  `cd v2-mobile-tester/app && source env_vars.sh && npm run release`
+  (build → sign → notarize → publish to S3 `aicc-bucket/autobot/publish`).
+- **The landing page download link auto-increments on every release.** `npm run release`
+  runs `scripts/sync-landing-download-url.mjs` as its final step, which rewrites
+  `autobot-landing-page/lib/constants.ts` `DOWNLOAD_URL` to the version just published
+  (`Autobot-<version>-arm64.dmg`). Keep this wired — if you change the release command,
+  preserve that step so the site never points at a stale build. The landing page is a
+  separate repo, so after releasing, commit+push it:
+  `cd ../autobot-landing-page && git add lib/constants.ts && git commit -m "release: Autobot <version>" && git push`.
+- **Before every release, audit the actual built bundle** (`ls dist/mac-arm64/Autobot.app/Contents/Resources/engine/*/inputs` should be empty/absent; `find … -name '*.env'`; `Resources/engine/parity` must be absent). Dev fixtures with real credentials have leaked into the dmg before — never write app state into `Resources/` (use `app.getPath('userData')` via `engineDataDir()`).
 
 ## What Claude should NOT do here
 

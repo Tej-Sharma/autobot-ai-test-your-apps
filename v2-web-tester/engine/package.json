@@ -1,0 +1,24 @@
+{
+  "name": "v2-web-drive-engine",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Production web drive engine: Gemini 3.5 Flash + Playwright MCP, journal memory + fork/backtrack exploration.",
+  "scripts": {
+    "setup": "npx -y playwright install chromium",
+    "explore": "node --env-file=../../v2-mobile-tester/spike/.env explore.mjs",
+    "drive": "node --env-file=../../v2-mobile-tester/spike/.env drive.mjs",
+    "critique": "node --env-file=../../v2-mobile-tester/spike/.env critique.mjs",
+    "annotate": "node annotate.mjs",
+    "report": "node report.mjs",
+    "test-app": "node --env-file=../../v2-mobile-tester/spike/.env explore.mjs && node --env-file=../../v2-mobile-tester/spike/.env critique.mjs && node annotate.mjs && node report.mjs"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@openrouter/ai-sdk-provider": "^1.0.0",
+    "@playwright/mcp": "^0.0.77",
+    "ai": "^5.0.0",
+    "sharp": "^0.33.5",
+    "zod": "^3.23.0"
+  }
+}

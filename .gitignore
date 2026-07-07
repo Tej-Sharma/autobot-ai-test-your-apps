@@ -5,6 +5,26 @@ runs/
 # build outputs
 build/
 DerivedData/
+dist/
+out/
+
+# dependencies
+node_modules/
+
+# desktop app (Selfloop) — out of scope for this repo
+v2-mobile-tester/app/
+
+# vendored tool checkouts
+tools/WebDriverAgent/
+
+# generated graphify output
+graphify-out/
+
+# secrets / local identity
+selfIdentity.plist
+
+# real account credentials — do not commit
+**/inputs/the-constella-app.json
 
 # logs
 *.log
@@ -20,3 +40,6 @@ DerivedData/
 # temp
 *.tmp
 *.aiff
+
+# local design/scratch docs
+docs/

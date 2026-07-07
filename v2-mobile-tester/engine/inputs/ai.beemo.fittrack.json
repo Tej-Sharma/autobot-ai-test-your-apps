@@ -1,0 +1,8 @@
+{
+  "credentials": {
+    "username": "demo",
+    "password": "demo"
+  },
+  "notes": "Log in by typing the username into the Username field, the password into the Password field, then tapping 'Log In'. After login, explore the dashboard: tap Start Workout, open each tab, and exercise every visible feature.",
+  "deviceUdid": "A5C6484B-5346-4BEC-8F4C-FFDDA286D71C"
+}

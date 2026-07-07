@@ -72,6 +72,7 @@ Usage:
   webbot run                         Re-run discovered flows + report
   webbot go                          run + notification + open report
   webbot flow <flow-file.md>         Execute a custom test plan
+  webbot design [<figma-link>]       Compare screens against their Figma frames (needs Figma MCP)
   webbot setup-audio                 Install BlackHole + switchaudio-osx (macOS; voice tests)
   webbot audio [status|on|off|restore]  Show / toggle / restore mic routing
   webbot speak <phrase>              TTS + play (feeds the browser mic via loopback)
@@ -91,6 +92,7 @@ Env:
   WEBBOT_APP_URL          URL a local project serves on (default: http://localhost:3000)
   WEBBOT_CLAUDE_MODEL     Claude model (default: claude-opus-4-8)
   WEBBOT_WORK_DIR         Same as --work-dir
+  WEBBOT_FIGMA_MCP_URL    Figma MCP transport for 'design' (default: http://127.0.0.1:3845/mcp)
   WEBBOT_TTS_VOICE        macOS `say` voice for voice tests (default: Samantha)
   WEBBOT_HEADLESS=1       Run the browser headless
   WEBBOT_TRACE=1          Enable devtools caps (Playwright tracing tools) for the agent
@@ -122,15 +124,16 @@ config_require() {
 # --- pass runner -------------------------------------------------------------
 # Boots the app (if local), wires Playwright MCP, composes the prompt, spawns
 # claude, and refreshes the latest-report symlink.
-# Args: <pass-prompt-file> [flow-file]
+# Args: <pass-prompt-file> [flow-file] [with-figma-0/1]
 run_pass() {
-  local pass_prompt="$1" flow_file="${2:-}"
+  local pass_prompt="$1" flow_file="${2:-}" with_figma="${3:-0}"
 
-  local app_url dev_command dev_dir storage_state
+  local app_url dev_command dev_dir storage_state figma_file
   app_url=$(config_get app_url)
   dev_command=$(config_get dev_command)
   dev_dir=$(config_get dev_dir)
   storage_state=$(config_get storage_state)
+  figma_file=$(config_get figma_file)
   [ -n "$app_url" ] || { echo "ERR: app_url missing from $CONFIG_FILE" >&2; exit 1; }
 
   local run_id run_dir
@@ -139,6 +142,11 @@ run_pass() {
   mkdir -p "$run_dir/screenshots"
   # Pre-seed the journals so the agent's first append always works.
   touch "$run_dir/journal.jsonl" "$run_dir/flaws.jsonl" "$run_dir/critique.jsonl"
+  # Design pass: seed its journal + the Figma-render dir too.
+  if [ "$with_figma" = 1 ]; then
+    mkdir -p "$run_dir/design"
+    touch "$run_dir/design-diffs.jsonl"
+  fi
 
   # If the flows involve voice (mic/dictation/getUserMedia), route the host mic to
   # BlackHole for the run and grant the browser mic permission. Devices are ALWAYS
@@ -159,10 +167,10 @@ run_pass() {
 
   local mcp_config ctx prompt
   mcp_config=$(mktemp -t webbot-mcp)
-  browser_write_mcp_config "$mcp_config" "$run_dir" "$storage_state" "$grant_mic"
+  browser_write_mcp_config "$mcp_config" "$run_dir" "$storage_state" "$grant_mic" "$with_figma"
   ctx=$(mktemp -t webbot-ctx)
   local auth_block; auth_block=$(config_auth_block "$CONFIG_FILE")
-  claude_write_run_context "$ctx" "$app_url" "$run_dir" "$WEBBOT_DIR" "$flow_file" "$auth_block"
+  claude_write_run_context "$ctx" "$app_url" "$run_dir" "$WEBBOT_DIR" "$flow_file" "$auth_block" "$with_figma" "$figma_file"
   prompt=$(claude_compose_prompt "$pass_prompt" "$ctx")
 
   echo ">> Spawning Claude (model: ${WEBBOT_CLAUDE_MODEL:-claude-opus-4-8}) — run dir: $run_dir" >&2
@@ -222,6 +230,7 @@ cmd_init() {
   "dev_command": "$dev_command",
   "dev_dir": "$dev_dir",
   "storage_state": "",
+  "figma_file": "",
   "credentials": [],
   "preferences": ""
 }
@@ -308,6 +317,37 @@ cmd_flow() {
   echo ">> Report: $LAST_RUN_DIR/report.html"
 }
 
+# Design-fidelity pass: compare implemented screens against their Figma frames.
+# Optional arg: a Figma file link/key to persist into config.json (figma_file). Otherwise
+# uses the stored figma_file, or the frame currently selected in the open Figma desktop app.
+cmd_design() {
+  webbot_enter_work_dir "$PWD"
+  config_require
+  local figma_link="${1:-}"
+  if [ -n "$figma_link" ]; then
+    /usr/bin/python3 -c "
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+cfg['figma_file'] = sys.argv[2]
+json.dump(cfg, open(sys.argv[1], 'w'), indent=2)
+" "$CONFIG_FILE" "$figma_link"
+    echo ">> Stored figma_file: $figma_link" >&2
+  fi
+  if ! figma_mcp_reachable; then
+    echo "WARN: Figma MCP not reachable at ${WEBBOT_FIGMA_MCP_URL:-http://127.0.0.1:3845/mcp}." >&2
+    echo "      Open the Figma desktop app, press Shift-D, and 'Enable desktop MCP server'" >&2
+    echo "      (or set WEBBOT_FIGMA_MCP_URL). Continuing anyway — the pass needs it." >&2
+  fi
+  # A persisted design-map.json lets re-runs skip auto-pairing; seed an empty one so the
+  # agent always has a file to read and fill.
+  [ -f "$WEBBOT_DIR/design-map.json" ] || echo '{"figma_file": "", "screens": []}' > "$WEBBOT_DIR/design-map.json"
+  run_pass "$WEBBOT_HOME/src/templates/design-prompt.md" "" 1
+  local diffs; diffs=$(flaw_count "$LAST_RUN_DIR/design-diffs.jsonl")
+  notify_user "webbot" "Design check complete — $diffs deviation(s) recorded"
+  notify_open_report "$LAST_RUN_DIR/design-report.html"
+  echo ">> Report: $LAST_RUN_DIR/design-report.html"
+}
+
 cmd_doctor() {
   webbot_enter_work_dir "$PWD"
   local ok=1
@@ -325,6 +365,12 @@ cmd_doctor() {
   fi
   # Audio loopback is informational (only voice-input flows need it).
   audio_doctor || true
+  # Figma MCP is informational (only the design pass needs it).
+  if figma_mcp_reachable; then
+    echo "ok   figma MCP (${WEBBOT_FIGMA_MCP_URL:-http://127.0.0.1:3845/mcp})"
+  else
+    echo "note figma MCP unreachable — for 'webbot design', enable it in Figma desktop (Shift-D)"
+  fi
   if [ -f "$CONFIG_FILE" ]; then
     echo "ok   $CONFIG_FILE (app: $(config_get app_url))"
     local ss; ss=$(config_get storage_state)
@@ -388,6 +434,7 @@ case "$SUB" in
   creds)   cmd_creds "$@" ;;
   run|go)  cmd_run ;;
   flow)    cmd_flow "$@" ;;
+  design)  cmd_design "$@" ;;
   setup-audio) cmd_setup_audio ;;
   audio)   cmd_audio "$@" ;;
   speak)   cmd_speak "$@" ;;

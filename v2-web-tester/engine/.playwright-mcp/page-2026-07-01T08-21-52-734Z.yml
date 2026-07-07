@@ -1,0 +1,120 @@
+- generic [active] [ref=f1e1]:
+  - banner [ref=f1e2]:
+    - generic [ref=f1e3]:
+      - link "Homepage" [ref=f1e5] [cursor=pointer]:
+        - /url: /
+        - img "Homepage" [ref=f1e6]
+      - generic [ref=f1e7]:
+        - list:
+          - listitem [ref=f1e8]:
+            - link "Domains" [ref=f1e9] [cursor=pointer]:
+              - /url: /domains
+          - listitem [ref=f1e10]:
+            - link "Protocols" [ref=f1e11] [cursor=pointer]:
+              - /url: /protocols
+          - listitem [ref=f1e12]:
+            - link "Numbers" [ref=f1e13] [cursor=pointer]:
+              - /url: /numbers
+          - listitem [ref=f1e14]:
+            - link "About" [ref=f1e15] [cursor=pointer]:
+              - /url: /about
+  - article [ref=f1e17]:
+    - main [ref=f1e18]:
+      - generic [ref=f1e19]:
+        - heading "Example Domains" [level=1] [ref=f1e20]
+        - paragraph [ref=f1e21]:
+          - text: As described in
+          - link "RFC 2606" [ref=f1e22] [cursor=pointer]:
+            - /url: /go/rfc2606
+          - text: and
+          - link "RFC 6761" [ref=f1e23] [cursor=pointer]:
+            - /url: /go/rfc6761
+          - text: ", a number of domains such as example.com and example.org are maintained for documentation purposes. These domains may be used as illustrative examples in documents without prior coordination with us. They are not available for registration or transfer."
+        - paragraph [ref=f1e24]: We provide a web service on the example domain hosts to provide basic information on the purpose of the domain. These web services are provided as best effort, but are not designed to support production applications. While incidental traffic for incorrectly configured applications is expected, please do not design applications that require the example domains to have operating HTTP service.
+        - heading "Further Reading" [level=2] [ref=f1e25]
+        - list [ref=f1e26]:
+          - listitem [ref=f1e27]:
+            - link "IANA-managed Reserved Domains" [ref=f1e28] [cursor=pointer]:
+              - /url: /domains/reserved
+        - generic [ref=f1e29]: Last revised 2017-05-13.
+    - navigation
+  - contentinfo [ref=f1e30]:
+    - generic [ref=f1e31]:
+      - table [ref=f1e32]:
+        - rowgroup [ref=f1e33]:
+          - row "Domain Names Root Zone Registry .INT Registry .ARPA Registry IDN Repository" [ref=f1e34]:
+            - cell "Domain Names" [ref=f1e35]:
+              - link "Domain Names" [ref=f1e36] [cursor=pointer]:
+                - /url: /domains
+            - cell "Root Zone Registry .INT Registry .ARPA Registry IDN Repository" [ref=f1e37]:
+              - list:
+                - listitem [ref=f1e38]:
+                  - link "Root Zone Registry" [ref=f1e39] [cursor=pointer]:
+                    - /url: /domains/root
+                - listitem [ref=f1e40]:
+                  - link ".INT Registry" [ref=f1e41] [cursor=pointer]:
+                    - /url: /domains/int
+                - listitem [ref=f1e42]:
+                  - link ".ARPA Registry" [ref=f1e43] [cursor=pointer]:
+                    - /url: /domains/arpa
+                - listitem [ref=f1e44]:
+                  - link "IDN Repository" [ref=f1e45] [cursor=pointer]:
+                    - /url: /domains/idn-tables
+          - row "Number Resources Abuse Information" [ref=f1e46]:
+            - cell "Number Resources" [ref=f1e47]:
+              - link "Number Resources" [ref=f1e48] [cursor=pointer]:
+                - /url: /numbers
+            - cell "Abuse Information" [ref=f1e49]:
+              - list:
+                - listitem [ref=f1e50]:
+                  - link "Abuse Information" [ref=f1e51] [cursor=pointer]:
+                    - /url: /abuse
+          - row "Protocols Protocol Registries Time Zone Database" [ref=f1e52]:
+            - cell "Protocols" [ref=f1e53]:
+              - link "Protocols" [ref=f1e54] [cursor=pointer]:
+                - /url: /protocols
+            - cell "Protocol Registries Time Zone Database" [ref=f1e55]:
+              - list:
+                - listitem [ref=f1e56]:
+                  - link "Protocol Registries" [ref=f1e57] [cursor=pointer]:
+                    - /url: /protocols
+                - listitem [ref=f1e58]:
+                  - link "Time Zone Database" [ref=f1e59] [cursor=pointer]:
+                    - /url: /time-zones
+          - row "About Us News Performance Excellence Archive Contact Us" [ref=f1e60]:
+            - cell "About Us" [ref=f1e61]:
+              - link "About Us" [ref=f1e62] [cursor=pointer]:
+                - /url: /about
+            - cell "News Performance Excellence Archive Contact Us" [ref=f1e63]:
+              - list:
+                - listitem [ref=f1e64]:
+                  - link "News" [ref=f1e65] [cursor=pointer]:
+                    - /url: /news
+                - listitem [ref=f1e66]:
+                  - link "Performance" [ref=f1e67] [cursor=pointer]:
+                    - /url: /performance
+                - listitem [ref=f1e68]:
+                  - link "Excellence" [ref=f1e69] [cursor=pointer]:
+                    - /url: /about/excellence
+                - listitem [ref=f1e70]:
+                  - link "Archive" [ref=f1e71] [cursor=pointer]:
+                    - /url: /archive
+                - listitem [ref=f1e72]:
+                  - link "Contact Us" [ref=f1e73] [cursor=pointer]:
+                    - /url: /contact
+      - paragraph [ref=f1e75]:
+        - text: The IANA functions coordinate the Internet’s globally unique identifiers, and are provided by
+        - link "Public Technical Identifiers" [ref=f1e76] [cursor=pointer]:
+          - /url: https://pti.icann.org
+        - text: ", an affiliate of"
+        - link "ICANN" [ref=f1e77] [cursor=pointer]:
+          - /url: https://www.icann.org/
+        - text: .
+      - generic [ref=f1e78]:
+        - list:
+          - listitem [ref=f1e79]:
+            - link "Privacy Policy" [ref=f1e80] [cursor=pointer]:
+              - /url: https://www.icann.org/privacy/policy
+          - listitem [ref=f1e81]:
+            - link "Terms of Service" [ref=f1e82] [cursor=pointer]:
+              - /url: https://www.icann.org/privacy/tos

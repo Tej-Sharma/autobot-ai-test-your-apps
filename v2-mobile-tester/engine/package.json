@@ -1,0 +1,23 @@
+{
+  "name": "v2-drive-engine",
+  "private": true,
+  "type": "module",
+  "version": "0.0.0",
+  "description": "Production iOS drive engine: Gemini 3.5 Flash + mobile-mcp, journal memory + fork/backtrack exploration.",
+  "scripts": {
+    "explore": "node --env-file=../spike/.env explore.mjs",
+    "drive": "node --env-file=../spike/.env alternate-dfs-app-traversal.mjs",
+    "critique": "node --env-file=../spike/.env critique.mjs",
+    "annotate": "node annotate.mjs",
+    "report": "node report.mjs",
+    "test-app": "node --env-file=../spike/.env explore.mjs && node --env-file=../spike/.env critique.mjs && node annotate.mjs && node report.mjs"
+  },
+  "dependencies": {
+    "@mobilenext/mobile-mcp": "^0.0.61",
+    "@modelcontextprotocol/sdk": "^1.13.0",
+    "@openrouter/ai-sdk-provider": "^1.0.0",
+    "ai": "^5.0.0",
+    "sharp": "^0.33.5",
+    "zod": "^3.23.0"
+  }
+}

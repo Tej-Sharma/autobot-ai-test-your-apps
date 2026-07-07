@@ -1,0 +1,9 @@
+node_modules/
+*/runs/
+*/inputs/
+*/figma-cache/
+figma-cache/
+*/.playwright-mcp/
+*.log
+**/*.log
+parity/out/

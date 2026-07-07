@@ -1,5 +1,31 @@
 # webbot — build plan
 
+## Design-fidelity pass — `webbot design` (2026-06-24)
+
+Compare implemented screens vs their Figma frames; output per-screen annotated screenshot
+(numbered boxes over off parts) + text list of `expected → actual` + severity.
+
+- [x] Research: Figma Dev Mode MCP tools (`get_screenshot`/`get_variable_defs`/`get_metadata`,
+      node-id addressed, local `127.0.0.1:3845/mcp`) + frontier (OverlayQA/Pixelay overlay vs
+      Uiprobe property-precision; naive 2-screenshot diff fails on alignment/subtle drift)
+- [x] Decision: source = connected Figma MCP (not computer-use — gives values, not just a pic)
+- [x] Decision: hybrid accuracy = match frame viewport (1:1) + anchor to real
+      `getBoundingClientRect` boxes + reconcile token values vs computed styles
+- [x] Decision: no hand-authored map — auto-pair frames↔screens (name + visual), cache in a
+      generated/correctable `design-map.json`; user only points at the Figma file
+- [x] Decision: separate pass (not folded into the flow drive) — controlled state + viewport;
+      reuses flow reach paths/creds. Per-repo, never global (only the MCP transport is global)
+- [x] `browser.sh` — Figma block in MCP config (`with_figma`), `figma_mcp_reachable` for doctor
+- [x] `claude.sh` — design paths in run context, `mcp__figma` in allowlist
+- [x] `bin/webbot` — `cmd_design`, dispatch, usage, `figma_file` config key, `run_pass` seeds
+      `design-diffs.jsonl` + `design/`, doctor Figma line
+- [x] `design-prompt.md` — auto-pair → capture both sides → reconcile → annotated report
+- [x] `critique-rubric.md` — "Design fidelity" categories; `web/CLAUDE.md` — documented
+- [x] Verified: bash syntax, MCP JSON valid both modes, design-mode run context, help/doctor/
+      dispatch. Doctor confirms live Figma server reachable.
+- [ ] First real run vs an app with a real Figma file (manual — needs Figma desktop + app)
+
+
 ## v1 port from ios-tester (2026-06-11)
 
 - [x] Research current tooling (Playwright MCP v0.0.76, playwright-cli, Chrome DevTools MCP, Stagehand/Skyvern/browser-use patterns)

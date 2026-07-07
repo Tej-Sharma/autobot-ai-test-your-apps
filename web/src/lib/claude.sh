@@ -24,9 +24,10 @@ claude_compose_prompt() {
 
 # Write the run-context block every pass receives. All paths absolute — they cross
 # a process boundary into the spawned claude.
-# Args: <out-path> <app-url> <run-dir> <webbot-dir> [flow-file] [auth-block]
+# Args: <out-path> <app-url> <run-dir> <webbot-dir> [flow-file] [auth-block] [design-mode-0/1] [figma-file]
 claude_write_run_context() {
   local out="$1" app_url="$2" run_dir="$3" webbot_dir="$4" flow_file="${5:-}" auth_block="${6:-}"
+  local design_mode="${7:-0}" figma_file="${8:-}"
   cat > "$out" <<EOF
 # Run context
 
@@ -47,6 +48,18 @@ EOF
     cat >> "$out" <<EOF
 - **flowFile (the test plan to execute)**: $flow_file
 - **Counter file (create if a flow needs unique values)**: $webbot_dir/counter
+EOF
+  fi
+  # Design-fidelity pass: the Figma source + the design artifacts. The `figma` MCP server
+  # is wired into this run's .mcp.json (get_screenshot / get_variable_defs / get_metadata).
+  if [ "$design_mode" = 1 ]; then
+    cat >> "$out" <<EOF
+- **Figma source**: ${figma_file:-"(none set — use the frame currently selected in the open Figma desktop app)"}
+- **Figma MCP tools**: \`mcp__figma__get_metadata\`, \`mcp__figma__get_screenshot\`,
+  \`mcp__figma__get_variable_defs\`, \`mcp__figma__get_design_context\`
+- **Design map (generated, persists across runs — read first, regenerate only if empty)**: $webbot_dir/design-map.json
+- **Design diffs journal (append-only, this run)**: $run_dir/design-diffs.jsonl
+- **Figma frame renders dir (save get_screenshot output here)**: $run_dir/design/
 EOF
   fi
   # Credentials + tester preferences (from .webbot/config.json, via webbot creds /
@@ -99,7 +112,7 @@ claude_run() {
       --strict-mcp-config \
       --permission-mode bypassPermissions \
       --max-budget-usd "$budget_usd" \
-      --allowedTools "Bash" "Read" "Write" "Edit" "Glob" "Grep" "mcp__playwright" \
+      --allowedTools "Bash" "Read" "Write" "Edit" "Glob" "Grep" "mcp__playwright" "mcp__figma" \
       --output-format stream-json \
       --include-partial-messages \
       --verbose \

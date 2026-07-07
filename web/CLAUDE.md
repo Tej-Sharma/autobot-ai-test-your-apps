@@ -38,6 +38,40 @@ screenshots dominate token spend (~1,600 tokens each vs ~200–800 for an a11y
 snapshot), compaction is uncontrollable, and a disk journal survives crashes and lets
 critique re-run without re-driving.
 
+## Design-fidelity pass (`webbot design`)
+
+A third pass, alongside drive + UX-critique, that compares each implemented screen against
+its **Figma frame** and reports where the build drifts from the design — per screen, an
+annotated implementation screenshot with **numbered boxes over the off parts** plus a
+text list mapping each number to `expected → actual` + severity.
+
+- **Source = the connected Figma MCP, not computer-use.** Wired into the run's `.mcp.json`
+  as a `figma` http server (the Figma desktop Dev Mode server at `127.0.0.1:3845/mcp` by
+  default; override with `WEBBOT_FIGMA_MCP_URL`). It gives the rendered frame
+  (`get_screenshot`), exact tokens (`get_variable_defs`: hex/spacing/type), and layer
+  geometry (`get_metadata`: x/y/w/h) — so the comparison cites real values, not eyeballs.
+- **No hand-authored mapping.** The pass auto-pairs Figma frames to discovered screens by
+  name + visual match (using `state-graph.json`), then caches the result in a generated,
+  user-correctable `.webbot/design-map.json`. The user only points at the Figma file
+  (`webbot design <figma-link>`, or the `figma_file` config key, or the open desktop
+  selection).
+- **Accuracy method = hybrid.** Capture the implementation at the frame's exact viewport
+  (1:1 alignment), anchor every finding to a real element box
+  (`getBoundingClientRect`), and reconcile **values** (Figma tokens vs live computed
+  styles) — not a picture-vs-picture diff (which misaligns and misses subtle drift).
+- **Per-repo, never global.** Only the Figma MCP *transport* is machine-level; the
+  `figma_file` binding, the `design-map.json` pairing, and the per-run diffs all live under
+  the target's `.webbot/`, exactly like `state-graph.json` and the flows.
+
+Prerequisite: the Figma desktop app open with its Dev Mode MCP server enabled
+(Shift-D → "Enable desktop MCP server"), or a reachable `WEBBOT_FIGMA_MCP_URL`.
+`webbot doctor` reports reachability (informational — only this pass needs it).
+
+New artifacts: `.webbot/design-map.json` (per-app, generated pairing) and, per run,
+`reports/<run>/design-diffs.jsonl` + `design/*.png` (Figma renders) +
+`design-report.html`. The design pass is driven by `src/templates/design-prompt.md`; the
+deviation categories live in the "Design fidelity" section of `critique-rubric.md`.
+
 ## v1 scope (intentional)
 
 - Local Mac only; Chromium via Playwright MCP (`npx @playwright/mcp@latest`)
@@ -86,7 +120,10 @@ critique re-run without re-driving.
 - `src/templates/discover-prompt.md` — first-run exploration + state-graph building
 - `src/templates/run-prompt.md` — drive + critique + report
 - `src/templates/flow-prompt.md` — user-authored test plan + exploratory phase
-- `src/templates/critique-rubric.md` — UX checklist (copied per-app, user-extendable)
+- `src/templates/design-prompt.md` — design-fidelity pass: auto-pair, capture both sides,
+  reconcile values, annotated `design-report.html`
+- `src/templates/critique-rubric.md` — UX checklist + "Design fidelity" categories
+  (copied per-app, user-extendable)
 - `src/templates/app-CLAUDE.md` — shape of the per-app flow definitions file
 
 ## Conventions

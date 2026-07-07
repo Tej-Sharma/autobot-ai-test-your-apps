@@ -50,6 +50,29 @@ For each screenshot, flag any of the following:
 - **Inconsistent colors** — accent colors that drift between screens
 - **Inconsistent components** — pill, rounded-rect, and square buttons across screens; two different modal styles; nav that changes shape between pages
 
+## Design fidelity (only when a Figma frame is provided — the `webbot design` pass)
+
+This section is NOT used by the normal run/flow critique (which judges UX in the abstract).
+It applies only when comparing a screen against its Figma frame. Judge against the **design's
+own spec**, citing exact expected-vs-actual values (the Figma side comes from
+`get_variable_defs` / `get_metadata`; the live side from computed styles). Categories:
+
+- **layout** — element repositioned, reordered, or differently aligned vs the frame
+- **spacing** — padding/margin/gap drift (e.g. design 16px, built 8px)
+- **size** — element width/height materially off the frame
+- **color** — fill / text / border / background hex differs from the design token
+- **typography** — font family, weight, size, or line-height mismatch
+- **radius** — corner radius differs (sharp where the design is rounded, etc.)
+- **copy** — text content differs from the frame (wording, casing, label)
+- **icon** — wrong, missing, or restyled icon/asset vs the design
+- **missing** — a layer present in the frame is absent in the build
+- **extra** — an element in the build that the frame doesn't have
+
+Be calibrated: ignore sub-pixel rounding, antialiasing, and intentional responsive reflow.
+A faithful screen should yield few or zero deviations. Each deviation becomes a
+`design-diffs.jsonl` entry (schema in the design-prompt), anchored to the offending
+element's real bounding box.
+
 ---
 
 ## Output format

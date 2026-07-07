@@ -51,3 +51,67 @@ Then `mobile_launch_app` (or `simctl launch`) works without daemon dependency.
 **Fix**: route output through a STACKED Multi-Output aggregate whose clock master is a REAL device + BlackHole (drift-corrected), created via CoreAudio `AudioHardwareCreateAggregateDevice` (see `src/lib/audio-multiout.swift`). Never BlackHole alone.
 
 **Process lesson (why we shipped the bug)**: the audio rework was "validated" only with device save/restore round-trips — never an actual voice flow against a real clock-sensitive app + Simulator. Plumbing tests pass while the real failure mode (the app crashing) goes untested. **When changing audio/device/system routing, the validation must reproduce the actual end-to-end scenario (a voice app capturing piped audio without crashing), not just confirm the shell wiring.** A clean save/restore round-trip is necessary but nowhere near sufficient.
+
+## Packaging: electron-builder silently drops root node_modules from extraResources (2026-07-02)
+
+**What happened:** shipped 0.1.1; production app crashed at run start with
+`ERR_MODULE_NOT_FOUND: 'ai'` from `Resources/engine-mobile/explore.mjs`. The engines'
+`node_modules` never made it into the bundle even though the extraResources filter was
+`'**/*'` — electron-builder's `createFilter()` (app-builder-lib `util/filter.js`)
+hard-rejects the root `node_modules` of any copied tree; positive filter patterns cannot
+override it.
+
+**Fix:** give each engine's `node_modules` its own extraResources entry
+(`from: ../engine/node_modules → to: engine-mobile/node_modules`) so it becomes the copy
+root and escapes the check.
+
+**Rules:**
+- "Notarized + boots" is not "works": the smoke test must exercise the app's real job
+  (here: starting a run, which spawns the bundled engine), not just launch/quit.
+- After changing what ships in a bundle, diff the bundle contents against the source tree
+  (`ls Resources/<dir>`), don't trust the packager's silent success.
+
+## Packaged app must not depend on the developer machine's toolchain (2026-07-03)
+
+**What happened:** 0.1.5 in production failed at run start with `spawn npx ENOENT` — both
+engines launched their MCP servers via `npx -y <pkg>@latest`. Dock-launched apps get a bare
+PATH (no homebrew/nvm), and end users may not have node/npx at all.
+
+**Fix:** MCP servers are now real engine dependencies (ship inside the bundled
+node_modules) spawned with `process.execPath` — the same Electron-bundled node the engine
+runs on. Two traps inside the fix itself:
+- The MCP SDK's StdioClientTransport strips the child env to an allowlist that drops
+  `ELECTRON_RUN_AS_NODE` — without passing `env: { ...process.env }`, process.execPath
+  boots a second Electron APP, not node.
+- Engine subprocess PATH is now hardened in runner.js (prepends /opt/homebrew/bin etc.)
+  for residual shell-outs.
+
+**Rule:** audit every spawn/exec in code that ships inside the .app: no npx, no @latest
+downloads at runtime, no bare command names that assume a terminal PATH. If it runs on the
+user's machine, it must resolve from inside the bundle or /usr/bin.
+
+**Known residual:** @playwright/mcp still needs Chromium in ~/Library/Caches/ms-playwright
+on first web run — needs a first-run `playwright install chromium` flow for fresh machines.
+
+## Never write app state inside the signed .app; never ship dev fixtures (2026-07-03 audit)
+
+Two whole-app audit findings, both "works on my machine, breaks/leaks for users":
+
+1. **Writable state inside the bundle.** runs/ and inputs/ resolved off engineDir() =
+   Resources/engine-* (inside the signed .app). That (a) fails under macOS App
+   Translocation (quarantined download runs from a read-only mount), (b) is wiped on
+   every auto-update (electron-updater swaps the whole .app), (c) breaks the code
+   signature. Fix: engineDataDir() → app.getPath('userData') when packaged; engines read
+   config via an INPUTS_DIR env override instead of join(HERE,'inputs'). Rule: the ONLY
+   writable per-user location for a packaged Electron app is userData — never Resources.
+
+2. **Dev fixtures shipped in the dmg.** engine/inputs/*.json (the developer's test-app
+   configs) carried a REAL username+password for a production service and shipped in every
+   public dmg (0.1.3–0.1.6). extraResources filtered runs/.state/logs but not inputs/.
+   Fix: exclude inputs/. Rule: audit the actual built bundle
+   (`ls Resources/.../inputs`, `find -name '*.env'`) before every release — filters that
+   look complete often miss one dir, and secrets in fixtures ship silently.
+
+Process rule: after the second production "dev-machine assumption" bug, STOP and run a
+full app audit (parallel reviewers over main / engines+CLI / packaging) instead of
+fixing one report at a time — they come in clusters.

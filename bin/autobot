@@ -513,7 +513,9 @@ cmd_run() {
   claude_write_mcp_config .autobot/.mcp.json "$udid"
   claude_seed_run_dir "$report_dir"
 
-  local prompt; prompt=$(mktemp)
+  # Shared run-context block, prepended to both the drive and critique prompts so the
+  # fresh critique process knows where the journals + screenshots live.
+  local ctx; ctx=$(mktemp)
   {
     echo "# Run context"
     echo
@@ -527,13 +529,42 @@ cmd_run() {
     claude_run_context_paths "$report_dir"
     echo "- Latest-report symlink to refresh: \`.autobot/reports/latest\` -> \`$run_id\`"
     echo
-    cat "$AUTOBOT_HOME/src/templates/run-prompt.md"
-  } > "$prompt"
+  } > "$ctx"
 
-  local composed; composed=$(claude_compose_prompt "$prompt")
-  echo ">> Starting run (drive → critique → report)..." >&2
-  claude_run "$composed" "$(pwd)/.autobot/.mcp.json" "$(pwd)"
-  rm -f "$prompt" "$composed"
+  # AUTOBOT_DRIVE_ENGINE=gemini (or any non-"claude" value) routes the drive+critique to the
+  # fast v2 engine (Vercel AI SDK + mobile-mcp) instead of `claude --print`. See v2-mobile-tester/.
+  if [ -n "${AUTOBOT_DRIVE_ENGINE:-}" ] && [ "$AUTOBOT_DRIVE_ENGINE" != "claude" ]; then
+    local bundle_id abs_report eng
+    bundle_id=$(/usr/bin/python3 -c "import json; print(json.load(open('$report_dir/run.json'))['bundleId'])")
+    abs_report="$(cd "$report_dir" && pwd)"
+    eng="$AUTOBOT_HOME/v2-mobile-tester/engine"
+    : "${OPENROUTER_API_KEY:?AUTOBOT_DRIVE_ENGINE=$AUTOBOT_DRIVE_ENGINE needs OPENROUTER_API_KEY in env}"
+    echo ">> Drive engine: $AUTOBOT_DRIVE_ENGINE (fast v2 engine: a11y-first, in-app nav, before/after diff)" >&2
+    ( cd "$eng" && RUN_DIR="$abs_report" DEVICE="$udid" \
+        MODE="${AUTOBOT_DRIVE_MODE:-login}" MODEL="${AUTOBOT_DRIVE_MODEL_V2:-google/gemini-3.5-flash}" \
+        node drive.mjs "$bundle_id" )
+    echo ">> Critique pass (Claude vision over saved screenshots)..." >&2
+    ( cd "$eng" && node critique.mjs "$abs_report" )
+    ( cd "$eng" && node report.mjs "$abs_report" )
+    rm -f "$ctx"
+  else
+    # Drive pass — spawns claude with mobile-mcp to walk the flows and save evidence.
+    local drive_prompt; drive_prompt=$(mktemp)
+    cat "$ctx" "$AUTOBOT_HOME/src/templates/run-prompt.md" > "$drive_prompt"
+    local composed; composed=$(claude_compose_prompt "$drive_prompt")
+    echo ">> Starting drive pass (Claude drives the sim)..." >&2
+    claude_run "$composed" "$(pwd)/.autobot/.mcp.json" "$(pwd)"
+    rm -f "$drive_prompt" "$composed"
+
+    # Critique pass — a FRESH claude process with no simulator. It reads the PNGs the
+    # drive pass saved to disk and writes report.html, so the heavy image-reading work
+    # starts on a clean context instead of on top of the whole drive transcript.
+    local critique_prompt; critique_prompt=$(mktemp)
+    cat "$ctx" "$AUTOBOT_HOME/src/templates/critique-prompt.md" > "$critique_prompt"
+    echo ">> Starting critique pass (fresh context, reads screenshots from disk)..." >&2
+    claude_run_critique "$critique_prompt" "$(pwd)"
+    rm -f "$critique_prompt" "$ctx"
+  fi
 
   ln -snf "$run_id" .autobot/reports/latest
   echo ">> Done. Report: $report_dir/report.html"
