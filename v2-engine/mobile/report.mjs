@@ -59,9 +59,12 @@ export function buildReport(runDir) {
   <span class=pill style="background:${SEV.low}">${counts.low || 0} low</span>
  </div></header>`;
 
+  // Every flaw links its annotated screenshot (bbox drawn) when annotate.mjs produced one.
+  const annotatedLink = (id) => (id && existsSync(join(runDir, 'screenshots', 'annotated', `${id}.png`)))
+    ? ` <a href="screenshots/annotated/${esc(id)}.png" class=tag>annotated ↗</a>` : '';
   const flawHtml = (f) => `<div class=flaw>
    <span class=sev style="color:${SEV[f.severity]}">${esc(f.severity)}</span>
-   <b>${esc(f.summary)}</b> <span class=tag>${esc(f.type)} · ${esc(f.src || '')}</span>
+   <b>${esc(f.summary)}</b> <span class=tag>${esc(f.type)} · ${esc(f.src || '')}</span>${annotatedLink(f.id)}
    <div style="color:#555;font-size:13px">${esc(f.detail)}</div></div>`;
 
   const screens = order.map((shot) => {
@@ -87,7 +90,7 @@ export function buildReport(runDir) {
     for (const d of designDiffs) (byShotD[d.screenshot] = byShotD[d.screenshot] || []).push(d);
     const diffHtml = (d) => `<div class=flaw>
      <span class=sev style="color:${SEV[d.severity]}">${esc(d.severity)}</span>
-     <b>${esc(d.summary)}</b> <span class=tag>${esc(d.category)} · design</span>
+     <b>${esc(d.summary)}</b> <span class=tag>${esc(d.category)} · design</span>${annotatedLink(d.id)}
      <div style="color:#555;font-size:13px">${esc(d.detail)}</div>
      <div style="color:#777;font-size:12.5px">expected: ${esc(d.expected)} → actual: ${esc(d.actual)}</div></div>`;
     const rows = dmap.screens.map((m) => `<div class=screen>

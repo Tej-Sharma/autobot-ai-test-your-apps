@@ -21,7 +21,11 @@ expected, then decide and emit your NEXT action.`,
   screenBullet: `- screen: a short, specific name for the CURRENT screen ("Workout summary: 0:00, 0 cal").`,
   uiDoneBullet: `- uiDone: what this screen shows / what you just accomplished or observed here.`,
   flawsBullet: `- flaws: anything broken/confusing/off you can SEE or INFER (report visible text/typos exactly;
-  a toggle/switch/segmented control can flip WITHOUT changing page text — that is NOT a bug).`,
+  a toggle/switch/segmented control can flip WITHOUT changing page text — that is NOT a bug). For
+  each flaw about one specific element, set elementIndex to its index in the numbered ELEMENTS
+  list above (the same list you use for nextAction) — this grounds the annotation to the
+  element's real position. Only fall back to a freehand bbox (a tight 0.0-1.0 fraction box of
+  the image, x0<x1, y0<y1) when no listed element matches; leave both null for whole-screen issues.`,
   crashedBullet: `- crashed: true if the screen is the iOS home screen or a different app.`,
   flowBullet: `- flowCompleted: null on almost every turn. Set it ONLY when you have JUST finished one whole
   user flow — a complete journey spanning a LARGE contiguous sequence of steps (never fewer

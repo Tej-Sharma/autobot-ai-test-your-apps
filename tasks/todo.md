@@ -47,6 +47,120 @@ After first smoke-test run, fill in:
 - What surprised us
 - What to change before showing the client
 
+## Manual Hirello web QA pass (2026-07-08)
+
+Spec: manually run `https://www.hirello.ai/` using the v2 web-driver logic without
+invoking the driver: observe current page, inspect accessible controls, capture
+screenshots, note console/network signals where available, choose exploratory actions,
+stop at the first major bug/UI error, and save both raw and annotated evidence under
+`output/playwright/`.
+
+- [x] Review v2 web observe/action/flaw rules
+- [x] Open Hirello and capture the landing page state
+- [x] Explore primary user paths until the first major bug/UI error
+- [x] Save raw screenshot evidence
+- [x] Annotate the bug screenshot
+- [x] Record findings and artifact paths
+
+### Review
+
+- Found first major functional/content bug in the landing-page footer Contact section.
+- Visible email text: `firstcontact@hirello.com`.
+- Actual link href: `mailto: hello@plateform.com`.
+- Impact: clicking the displayed contact email opens a composer to the wrong address,
+  and the target domain appears misspelled.
+- Raw screenshot:
+  `output/playwright/hirello-manual/screenshots/hirello-contact-email-bug-raw.png`
+- Annotated screenshot:
+  `output/playwright/hirello-manual/annotated/hirello-contact-email-bug-annotated.png`
+- Browser signals: Hirello loaded with 0 console errors and 6 warnings.
+
+## Manual product-site QA pass from founding designers CSV (2026-07-08)
+
+Spec: process `/Users/tejas1/Downloads/design-qa-teams-founding-designers-2026-07-08.csv`
+one person at a time. For each row, visit the company/product website, follow the
+v2 web-driver observe-act-record logic manually in Codex/Playwright, use the provided
+test credentials only when a product login/signup blocks meaningful exploration, stop
+at the first major bug/UI error, save raw and annotated screenshots under
+`output/playwright/founding-designers-2026-07-08/`, and write a consolidated report.
+
+- [x] Parse the CSV and normalize product URLs
+- [x] Create the run folder and report files
+- [x] QA each unique product site one by one
+- [x] Map duplicate people to already-tested product evidence
+- [x] Verify annotated screenshots and report paths
+- [x] Record review summary
+
+### Review
+
+- Processed 17 people from the CSV, covering 15 unique product URLs.
+- Accepted 4 major user-visible bugs with annotated evidence:
+  Warmstealth HTTPS certificate failure, Musubi dead demo CTA + giant blank gap,
+  Tempo giant blank page gap, and MoolAI blank/placeholder page sections.
+- Duplicate Claimbrite rows were mapped to the same tested product evidence.
+- Used the provided email/password for MeritFirst candidate signup; the flow reached
+  an email-verification gate, so I could not continue without mailbox access.
+- Wrote consolidated outputs:
+  `output/playwright/founding-designers-2026-07-08/report.md` and
+  `output/playwright/founding-designers-2026-07-08/report.csv`.
+
+## LinkedIn DM draft prep from product QA findings (2026-07-08)
+
+Spec: use the CSV LinkedIn profile URLs and accepted QA findings to prepare
+review-only LinkedIn DM copy. Only draft outreach for rows with real accepted major
+bugs; mark rows with no major bug as skipped instead of inventing findings. If using
+Dia/LinkedIn UI, do not send messages; stop at reviewable drafts/tabs.
+
+- [x] Generate per-person message copy
+- [x] Save review artifact with one tab/section per person
+- [x] Use Dia browser via screen control for review-only LinkedIn tabs/drafts
+- [x] Stop before any send action
+
+### Review
+
+- Drafted outreach only for the 4 contacts with accepted major bugs; skipped rows
+  where the QA pass found no major issue.
+- Saved review artifacts:
+  `output/playwright/founding-designers-2026-07-08/linkedin-dm-drafts.md`,
+  `output/playwright/founding-designers-2026-07-08/linkedin-dm-drafts.csv`,
+  `output/playwright/founding-designers-2026-07-08/linkedin-dm-drafts.json`, and
+  `output/playwright/founding-designers-2026-07-08/linkedin-dm-drafts-tabs.html`.
+- Opened the 4 LinkedIn profile tabs in Dia and confirmed the account is logged in.
+- Did not send any messages. I stopped before creating in-LinkedIn drafts because
+  the Dia/LinkedIn profile menu hit-testing selected adjacent actions while trying
+  to choose `Message`; status captured in
+  `output/playwright/founding-designers-2026-07-08/linkedin-dm-dia-status.md`.
+
+## Manual Eli web QA pass (2026-07-08)
+
+Spec: manually run `https://www.eli.build/` using the v2 web-driver logic without
+invoking the driver: observe URL, controls, screenshots, console/network signals,
+choose exploratory actions from the current page, stop at the first major bug or UI
+error, then save raw and annotated screenshot evidence under `output/playwright/`.
+
+- [x] Review v2 web observe/action/flaw rules
+- [x] Open Eli and capture the landing page state
+- [x] Explore primary user paths until the first major bug/UI error
+- [x] Save raw screenshot evidence
+- [x] Annotate the bug screenshot
+- [x] Record findings and artifact paths
+
+### Review
+
+- Found first conversion-path issue in the `Get in touch` HubSpot form.
+- Repro: open `https://www.eli.build/`, click `Get in touch`, fill required fields
+  with `test@example.com` for email, choose `Other`, then submit.
+- Result: form rejects the syntactically valid email with
+  `Please enter a valid email address`; the submit request returns HTTP 400.
+- Raw screenshot:
+  `output/playwright/eli-contact-submitted-locator.png`
+- Annotated screenshot:
+  `output/playwright/eli-contact-submitted-annotated.png`
+- Extra signals checked before stopping: landing, Contractors, Programs, Capital
+  Partners, Company, Blog, newest Blog article, Careers, and Login loaded without a
+  major visible error. Capital Partners/mobile emitted a non-blocking document-policy
+  console error for `js-profiling`.
+
 ## v2 drive engine — backlog (Tier 3: #11, #14)
 - [ ] **Discovery pass** (#11): before driving, auto-propose the app's key flows and
       auto-write `v2-mobile-tester/engine/inputs/<bundle>.json` (credentials + test data +
@@ -101,6 +215,51 @@ Ship a release: `cd v2-mobile-tester/app && source env_vars.sh && npm run releas
       desktop handoff; then x-autobot-user header from runner, flip enforcement on.
 - [ ] Stripe checkout + webhook → AutobotSubscription.apply_stripe_subscription. Needs
       pricing decision.
+
+## BBox annotation/display bug investigation (2026-07-09)
+
+Spec: determine whether the invisible/misaligned flaw annotation bug from the pasted
+context is fixed in the current tree by tracing the complete path from test execution
+and flaw bbox generation, through annotation drawing, to report/desktop display.
+
+- [x] Identify the bug signature and intended fix from pasted context
+- [x] Trace bbox generation during explore/critique for mobile and web
+- [x] Trace annotation drawing and bbox sanitization
+- [x] Trace report/app display of annotated screenshots
+- [x] Run focused verification for module imports/tests and any existing run artifacts
+- [x] Record review conclusion and remaining risk
+
+### Review
+
+- The core invisible-annotation bug is fixed for critique output and for draw-time
+  recovery. `core/bbox.mjs` now centralizes element grounding, style-sweep web
+  grounding, pixel/fraction bbox sanitization, and PNG dimension reads.
+- Critique now grounds mobile flaws from `elements.jsonl`; when mobile a11y boxes
+  are absent, web critique falls back to `styles/<shot>.json` and normalizes those
+  real page-pixel boxes against the PNG size. Freehand bboxes are sanitized before
+  being persisted.
+- Annotate now sanitizes every source bbox against the actual image metadata before
+  drawing, so old critique artifacts with pixel coordinates can be re-annotated
+  without re-running the model.
+- Desktop display is wired: `buildReportData()` attaches
+  `screenshots/annotated/<id>.png` when it exists, `RunBlock` opens/reveals
+  `flaw.annotated || flaw.screenshot`, and fix prompts prefer the annotated path.
+- Static `report.html` is not wired to annotated images; both mobile and web static
+  reports still render the raw screenshot thumbnail. The desktop "View bug" path is
+  fixed, but static HTML will still look unannotated unless report rendering is
+  updated separately.
+- Existing artifacts support the diagnosis: older web critique output still contains
+  pixel bboxes, while annotate generated overlays for those flaws after the draw-time
+  sanitizer was added.
+- Verification run: bbox helper assertions passed, core modules imported, and a
+  synthetic pixel-coordinate bbox produced a visible annotated PNG with 2056 red-ish
+  overlay pixels. `npm run parity` still fails with the existing 35 prompt/schema
+  mismatches (`elementIndex` schema + prompt prose), matching the pasted note.
+- Remaining gap: web explore-time flaws still do not get style-sweep grounding in
+  `core/explore.mjs`; they rely on sanitized freehand bboxes because only mobile
+  supplies `obs.elSpace`. Critique + annotate cover the main reported issue, but
+  explore-only web flaws can still lack an annotation if their freehand bbox is
+  rejected.
 
 ## Unified v2 engine tree (2026-07-03)
 

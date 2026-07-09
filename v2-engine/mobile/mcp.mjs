@@ -68,16 +68,39 @@ export async function connectMobileMcp(device) {
   const screenSize = async () => JSON.stringify((await call(T.size).catch(() => null))?.content ?? 'unknown');
 
   // launch + poll up to launchWaitMs for first content (>=3 a11y elements), proceed early.
-  const launchAndWait = async (bundle, launchWaitMs = 10000) => {
-    const r = await call(T.launch, { packageName: bundle }).catch((e) => ({ error: e.message }));
+  // Tool errors come back as isError RESULTS (the SDK doesn't throw for them) — without
+  // this check a failed launch would silently leave the explorer testing the springboard.
+  // One retry absorbs transient simctl flakes (e.g. launching right after a terminate).
+  // Pre-launch tree snapshots guard against a false "ready": whatever app was foreground
+  // BEFORE a launch also has >=3 elements, so readiness additionally requires the tree to
+  // have CHANGED from the snapshot (or a minimum settle time to have passed) — else the
+  // poll "succeeds" instantly on the old app and the run tests the wrong thing.
+  const treeKey = (els) => els.map((e) => `${e.label}@${e.x},${e.y}`).join('|');
+  const snapshotTree = async () => treeKey(await listElements().catch(() => []));
+  const waitForContent = async (launchWaitMs = 10000, before = '') => {
     const start = Date.now();
+    const minSettle = Math.min(1200, launchWaitMs);
     let ready = 0;
     while (Date.now() - start < launchWaitMs) {
-      ready = (await listElements()).length;
-      if (ready >= 3) break;
+      const els = await listElements();
+      ready = els.length;
+      if (ready >= 3 && (treeKey(els) !== before || Date.now() - start >= minSettle)) break;
       await sleep(700);
     }
-    return { launchResult: r?.content ?? r, ready, waited: Date.now() - start };
+    return { ready, waited: Date.now() - start };
+  };
+
+  const launchAndWait = async (bundle, launchWaitMs = 10000) => {
+    const errText = (res) => (res?.content || []).filter((c) => c.type === 'text').map((c) => c.text).join(' ').slice(0, 300);
+    const before = await snapshotTree();
+    let r = await call(T.launch, { packageName: bundle }).catch((e) => ({ isError: true, content: [{ type: 'text', text: e.message }] }));
+    if (r?.isError) {
+      await sleep(1200);
+      r = await call(T.launch, { packageName: bundle }).catch((e) => ({ isError: true, content: [{ type: 'text', text: e.message }] }));
+      if (r?.isError) throw new Error(`could not launch ${bundle}: ${errText(r) || 'unknown launch error'}`);
+    }
+    const w = await waitForContent(launchWaitMs, before);
+    return { launchResult: r?.content ?? r, ...w };
   };
 
   const tap = (x, y) => call(T.tap, { x, y });
@@ -86,6 +109,6 @@ export async function connectMobileMcp(device) {
   const terminate = (bundle) => T.terminate ? call(T.terminate, { packageName: bundle }).catch(() => null) : null;
   const saveScreenshot = (path) => T.saveShot ? call(T.saveShot, { saveTo: path, path, filePath: path }).catch(() => null) : null;
 
-  return { mcp, tools, T, raw, call, screenshotImage, listElements, screenSize, launchAndWait, tap, typeText, swipe, terminate, saveScreenshot,
+  return { mcp, tools, T, raw, call, screenshotImage, listElements, screenSize, snapshotTree, waitForContent, launchAndWait, tap, typeText, swipe, terminate, saveScreenshot,
     close: () => mcp.close() };
 }

@@ -35,10 +35,29 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { mkdirSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadGraph, saveGraph, markTried } from './stategraph.mjs';
+import { normalizedElBoxes, sanitizeBbox } from './bbox.mjs';
 
 export const credLineOf = (INPUTS) => INPUTS.credentials
   ? `Test credentials you may use to sign in — username: "${INPUTS.credentials.username}", password: "${INPUTS.credentials.password}".`
   : 'No credentials provided.';
+
+// ---- entry modes (MODE=login|signup) — shared by the platform entrypoints ----
+// Signup runs get throwaway generated credentials (random letters @g.com, fixed password)
+// so the model never has to invent them — generated in code so they're reproducible in
+// the run log, and NEVER saved anywhere (log-only by design).
+const randLetters = (n) => Array.from({ length: n }, () => String.fromCharCode(97 + Math.floor(Math.random() * 26))).join('');
+export const signupCreds = () => ({ username: `${randLetters(10)}@g.com`, password: 'Password@123' });
+export const entryLineOf = (mode, creds) => {
+  if (mode === 'signup') return `ENTRY MODE — SIGNUP (mandatory first goal): the app starts from a completely fresh state.
+FIRST create a brand-new account start-to-finish. Use EXACTLY these generated test credentials
+wherever an email/username or password is asked — email: "${creds.username}", password:
+"${creds.password}" (invent any other profile details naturally). Never sign into an existing
+account. Once signup completes and you land in the app, test the whole app as described below.`;
+  if (mode === 'login') return `ENTRY MODE — LOGIN (mandatory first goal): the app starts from a completely fresh state, so
+you will be signed out. FIRST sign in start-to-finish using the test credentials provided
+below — then test the whole app as described.`;
+  return '';
+};
 
 const now = () => new Date().toISOString();
 const untriedOf = (n) => (n.controls || []).filter((c) => !n.tried.includes(c));
@@ -86,7 +105,7 @@ export function renderCoverage({ g, sig, els, chromeSeen, chromeTried, flowsDone
 // ============================ MAIN LOOP ============================
 export async function runExplore({ driver, cfg }) {
   const { MODEL, GLOBAL_STEPS, GOAL, FOCUS, FLOW_MIN_STEPS, RUN, STATE, ABOUT, credLine,
-    APP_INSTRUCTIONS, instrPath, exploreSystem, TURN } = cfg;
+    APP_INSTRUCTIONS, instrPath, exploreSystem, TURN, ENTRY = '' } = cfg;
   const voc = driver.voc;
 
   const model = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY, baseURL: process.env.OPENROUTER_BASE_URL || undefined })(MODEL);
@@ -103,12 +122,20 @@ export async function runExplore({ driver, cfg }) {
   // ---- io helpers ----
   const journalStep = (o) => appendFileSync(JOURNAL, JSON.stringify({ ts: now(), ...o }) + '\n');
   const seenFlaws = new Set(); let flawN = 0;
-  function recordFlaws(flaws, screen, shot) {
+  // Same grounding critique.mjs uses: a freehand bbox from the model is unreliable (it
+  // routinely reports raw device points instead of the 0-1 fractions the schema asks
+  // for, which silently draws annotate.mjs's box off-canvas). elementIndex against the
+  // SAME numbered ELEMENTS list the model already uses for nextAction is reliable —
+  // snap to that element's real, normalized position when given; otherwise validate the
+  // freehand bbox is actually in range and drop it rather than trust a bad guess.
+  function recordFlaws(flaws, screen, shot, boxes, space) {
     for (const f of flaws || []) {
       const key = `${f.type}::${f.summary.toLowerCase().slice(0, 32)}`;
       if (seenFlaws.has(key)) continue; seenFlaws.add(key);
       const id = `F-${String(++flawN).padStart(3, '0')}`;
-      appendFileSync(FLAWS, JSON.stringify({ id, ts: now(), screen, ...f, screenshots: shot ? [shot] : [], status: 'open' }) + '\n');
+      const el = (boxes && f.elementIndex != null) ? boxes[f.elementIndex] : null;
+      const bbox = el ? { x0: el.x0, y0: el.y0, x1: el.x1, y1: el.y1 } : sanitizeBbox(f.bbox, space);
+      appendFileSync(FLAWS, JSON.stringify({ id, ts: now(), screen, ...f, bbox, screenshots: shot ? [shot] : [], status: 'open' }) + '\n');
       console.log(`   flaw ${id} [${f.severity} ${f.type}] ${f.summary}`);
     }
   }
@@ -155,7 +182,7 @@ export async function runExplore({ driver, cfg }) {
     const { object: t } = await generateObject({
       model, schema: TURN, providerOptions: reasoningOpts,
       messages: [
-        { role: 'system', content: exploreSystem({ about: ABOUT, size: driver.promptSize(), goal: GOAL, focus: FOCUS, credLine,
+        { role: 'system', content: exploreSystem({ about: ABOUT, size: driver.promptSize(), goal: GOAL, focus: FOCUS, entry: ENTRY, credLine,
           memory: renderMemory(trace, voc),
           coverage: renderCoverage({ g, sig: obs.sig, els, chromeSeen, chromeTried, flowsDone, controlsOf: driver.graph.controlsOf, voc }),
           appInstructions: APP_INSTRUCTIONS }) },
@@ -187,7 +214,7 @@ export async function runExplore({ driver, cfg }) {
     // list, which the journal drops. `space` is the coordinate space the els
     // live in (device points on mobile; absent when the driver has no coords).
     appendFileSync(ELEMENTS, JSON.stringify({ step, screenshot: shot, screen: t.screen, sig: obs.sig, space: obs.elSpace || null, els }) + '\n');
-    recordFlaws(t.flaws, t.screen, shot);
+    recordFlaws(t.flaws, t.screen, shot, normalizedElBoxes(obs.elSpace, els), obs.elSpace);
     const aStr = driver.actionStr(t.nextAction);
     const rec = { step, time: now(), screen: t.screen, ...obs.recExtras, uiDone: t.uiDone, action: aStr, expectation: t.nextAction.expectation,
       expectationCheck: t.expectationCheck, reasoning: t.reasoning, goalsSoFar: t.goalsSoFar, goalsCompleted: t.goalsCompleted,

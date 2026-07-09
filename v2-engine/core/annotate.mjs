@@ -10,6 +10,7 @@
 import sharp from 'sharp';
 import { existsSync, readFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { sanitizeBbox } from './bbox.mjs';
 
 const readJsonl = (p) => existsSync(p) ? readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
 
@@ -61,7 +62,12 @@ export async function annotateRun(runDir) {
     try {
       const img = sharp(src);
       const { width, height } = await img.metadata();
-      const svg = overlaySvg({ width, height, bbox: f.bbox, severity: f.severity, summary: f.summary });
+      // Last line of defense: a bbox that isn't really 0-1 fractions would draw
+      // off-canvas — an annotated file that LOOKS unannotated. Salvage pixel
+      // coords against this image's size, clamp overshoots, skip hopeless ones.
+      const bbox = sanitizeBbox(f.bbox, { w: width, h: height });
+      if (!bbox) { console.log(`  ${f.id}  ←  annotation skipped (bbox out of range: ${JSON.stringify(f.bbox)})`); continue; }
+      const svg = overlaySvg({ width, height, bbox, severity: f.severity, summary: f.summary });
       const outFile = join(outDir, `${f.id}.png`);
       await img.composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).toFile(outFile);
       n++;

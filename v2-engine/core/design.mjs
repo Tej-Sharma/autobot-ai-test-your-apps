@@ -30,6 +30,7 @@ import { existsSync, readFileSync, writeFileSync, appendFileSync, mkdirSync, cop
 import { join, basename } from 'node:path';
 import { getManifest } from './figma.mjs';
 import { webEvidence, mobileEvidence } from './evidence.mjs';
+import { normalizedElBoxes, normalizedStyleBoxes, sanitizeBbox, pngSize } from './bbox.mjs';
 
 const readJsonl = (p) => existsSync(p) ? readFileSync(p, 'utf8').trim().split('\n').filter(Boolean).map((l) => JSON.parse(l)) : [];
 const now = () => new Date().toISOString();
@@ -49,8 +50,10 @@ const DIFF = z.object({
   detail: z.string().describe('the full finding, citing exact expected-vs-actual values from the design spec where possible'),
   expected: z.string().describe('what the design specifies, e.g. "#2563EB fill" or "16px gap"'),
   actual: z.string().describe('what the implementation shows'),
+  elementIndex: z.number().int().nullable()
+    .describe('index into the IMPLEMENTATION ELEMENTS list (if provided) of the element this deviation is about — its real position grounds the annotation box; null when no listed element matches'),
   bbox: z.object({ x0: z.number(), y0: z.number(), x1: z.number(), y1: z.number() }).nullable()
-    .describe('normalized 0-1 box on the IMPLEMENTATION screenshot around the deviating element; null for whole-screen issues'),
+    .describe('normalized 0-1 box on the IMPLEMENTATION screenshot around the deviating element; only used as a fallback when elementIndex is null; null for whole-screen issues'),
 });
 const JUDGE = z.object({ verdict: z.string().describe('one sentence: overall fidelity of this screen to its design'), diffs: z.array(DIFF) });
 
@@ -150,7 +153,7 @@ export async function designRun(runDir, { noun = 'screen', envHint = 'the run en
     const key = elsByShot.get(e.screenshot)?.sig || e.screen;
     if (!key || seen.has(key)) continue;
     seen.add(key);
-    screens.push({ screenshot: e.screenshot, screen: e.screen, sig: key, els: elsByShot.get(e.screenshot)?.els || [] });
+    screens.push({ screenshot: e.screenshot, screen: e.screen, sig: key, els: elsByShot.get(e.screenshot)?.els || [], space: elsByShot.get(e.screenshot)?.space || null });
   }
   if (!screens.length) { console.log('design: no screenshots in this run — nothing to compare'); return null; }
 
@@ -244,13 +247,30 @@ You may also receive MEASURED EVIDENCE — deterministic comparisons computed fr
 
     const spec = { frame: p.frame.name, width: p.frame.width, height: p.frame.height,
       elements: p.frame.els.slice(0, 120).map(({ id, ...e }) => e) };
+
+    // Ground diff bboxes the same way critique grounds flaw bboxes (core/bbox.mjs):
+    // list the implementation's elements with their TRUE normalized boxes and have
+    // the model name an elementIndex — a freehand box is only a sanitized fallback.
+    const shotBuf = readFileSync(join(runDir, p.screenshot));
+    const dims = pngSize(shotBuf);
+    let boxes = normalizedElBoxes(p.space, p.els);
+    if (!boxes) {
+      const stylesPath = join(runDir, 'styles', basename(p.screenshot).replace(/\.png$/, '.json'));
+      if (existsSync(stylesPath)) {
+        try { boxes = normalizedStyleBoxes(JSON.parse(readFileSync(stylesPath, 'utf8')), dims); } catch { /* grounding is best-effort */ }
+      }
+    }
+    if (!boxes) console.log(`   ⚠ no grounding source for ${p.screenshot} — diff boxes will be freehand (annotation accuracy degraded)`);
+    const fmt = (v) => v.toFixed(3);
+    const elementsBlock = boxes ? `\n\nIMPLEMENTATION ELEMENTS, with their true normalized boxes (x0,y0,x1,y1):\n${boxes.map((b, i) => b ? `[${i}] "${b.label}"${b.type ? ` (${b.type})` : ''} box=(${fmt(b.x0)},${fmt(b.y0)},${fmt(b.x1)},${fmt(b.y1)})` : null).filter(Boolean).join('\n')}\n\nWhen a deviation is about one of these elements, set elementIndex to its index — its true box will be used for the annotation. Only draw your own bbox when no listed element matches.` : '';
+
     const { object } = await generateObject({
       model, schema: JUDGE,
       messages: [
         { role: 'system', content: system },
         { role: 'user', content: [
-          { type: 'text', text: `Implemented ${noun}: "${p.screen}". Design frame: "${p.frame.name}". The first image is the IMPLEMENTATION, the second is the DESIGN. Design element spec:\n${JSON.stringify(spec)}${evidence.length ? `\n\nMEASURED EVIDENCE:\n${evidence.map((l) => `- ${l}`).join('\n')}` : ''}` },
-          { type: 'image', image: `data:image/png;base64,${b64(join(runDir, p.screenshot))}` },
+          { type: 'text', text: `Implemented ${noun}: "${p.screen}". Design frame: "${p.frame.name}". The first image is the IMPLEMENTATION, the second is the DESIGN. Design element spec:\n${JSON.stringify(spec)}${evidence.length ? `\n\nMEASURED EVIDENCE:\n${evidence.map((l) => `- ${l}`).join('\n')}` : ''}${elementsBlock}` },
+          { type: 'image', image: `data:image/png;base64,${shotBuf.toString('base64')}` },
           { type: 'image', image: `data:image/png;base64,${b64(framePng)}` },
         ] },
       ],
@@ -258,8 +278,10 @@ You may also receive MEASURED EVIDENCE — deterministic comparisons computed fr
 
     for (const d of object.diffs) {
       const id = `D-${String(++diffN).padStart(3, '0')}`;
+      const el = (boxes && d.elementIndex != null) ? boxes[d.elementIndex] : null;
+      const bbox = el ? { x0: el.x0, y0: el.y0, x1: el.x1, y1: el.y1 } : sanitizeBbox(d.bbox, dims);
       appendFileSync(DIFFS, JSON.stringify({ id, ts: now(), screenshot: p.screenshot, screen: p.screen,
-        figma_node: p.frame.id, figma_frame: p.frame.name, figma_image: localFrame, ...d }) + '\n');
+        figma_node: p.frame.id, figma_frame: p.frame.name, figma_image: localFrame, ...d, bbox }) + '\n');
     }
     judged++;
     console.log(`  ${p.screenshot}  [${p.screen}] vs "${p.frame.name}"  ${object.diffs.length} diff(s) — ${object.verdict}`);

@@ -115,3 +115,31 @@ Two whole-app audit findings, both "works on my machine, breaks/leaks for users"
 Process rule: after the second production "dev-machine assumption" bug, STOP and run a
 full app audit (parallel reviewers over main / engines+CLI / packaging) instead of
 fixing one report at a time — they come in clusters.
+
+## Shell strings built from model output WILL break on quoting (2026-07-07)
+
+The v2 mobile driver typed text via `execSync("osascript -e '...keystroke \"${esc}\"'")`.
+The AppleScript escaping was right; the SHELL single-quoting wasn't — the first
+model-authored string containing an apostrophe ("next week's launch") terminated the
+quote, execSync threw, and the whole explore run died. Model output goes through these
+paths constantly; an apostrophe is not an edge case, it's Tuesday.
+
+Rules:
+1. NEVER build a shell command string around model/user text. Use
+   execFileSync(cmd, [args]) — no shell, no quoting layer at all. Escape only for the
+   innermost language (here: AppleScript's `\` and `"`, plus newline → `\n`).
+2. Typing/interaction failures inside a driver must WARN and continue, not throw — the
+   explore loop treats the world as observable; the model sees the empty field and
+   adapts. Only failures that make the run meaningless (app won't launch) should throw.
+3. MCP tool errors are `isError` RESULTS, not rejections — a `.catch()` around
+   `callTool` catches nothing. Check `res.isError` explicitly wherever a tool failure
+   must change behavior (launch verification), and expect scary-but-harmless stderr
+   traces from the server process for the rest (route expected-failure calls like
+   pre-launch terminate around MCP entirely: `simctl` + try/catch).
+
+## Outreach drafts: keep subject lines per-contact and product-specific (2026-07-08)
+
+When preparing LinkedIn/InMail drafts from QA findings, derive the subject from the
+recipient's company/product, not from a generic campaign string. Use the exact requested
+format (`Found bug on {company}!`) and verify the subject before filling the body, because
+LinkedIn draft UIs can preserve partially filled state across tab switches.

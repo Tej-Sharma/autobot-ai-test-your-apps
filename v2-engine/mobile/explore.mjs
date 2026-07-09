@@ -8,7 +8,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runExplore, credLineOf } from '../core/explore.mjs';
+import { runExplore, credLineOf, signupCreds, entryLineOf } from '../core/explore.mjs';
 import { exploreSystem } from './prompts.mjs';
 import { TURN } from './schema.mjs';
 import { createMobileDriver } from './driver.mjs';
@@ -32,7 +32,23 @@ const INPUTS = existsSync(inputsPath) ? JSON.parse(readFileSync(inputsPath, 'utf
 // app-specific test instructions, auto-loaded by app id: instructions/<bundle>.md
 const instrPath = join(HERE, 'instructions', `${BUNDLE}.md`);
 const APP_INSTRUCTIONS = existsSync(instrPath) ? readFileSync(instrPath, 'utf8').trim() : '';
-const credLine = credLineOf(INPUTS);
+
+// Entry mode (MODE=login|signup, unset = test from the app's current state).
+// signup: fresh-install reset + a generated throwaway account (creds are logged, never saved).
+// login: fresh-install reset + sign in with the saved credentials — but WITHOUT saved
+// credentials there's nothing to sign in with, so skip the reset instead of locking the
+// run out at a login wall.
+const MODE = (process.env.MODE || '').toLowerCase();
+let credLine = credLineOf(INPUTS), ENTRY = '', RESET = false;
+if (MODE === 'signup') {
+  const creds = signupCreds();
+  ENTRY = entryLineOf('signup', creds); RESET = true;
+  credLine = credLineOf({ credentials: creds });
+  console.log(`entry mode: signup — generated test credentials: ${creds.username} / ${creds.password} (log-only, not saved)`);
+} else if (MODE === 'login') {
+  if (INPUTS.credentials) { ENTRY = entryLineOf('login'); RESET = true; console.log('entry mode: login — app will be reset, then signed in with saved credentials'); }
+  else console.log('entry mode: login requested but no credentials saved for this app — testing from current state (no reset)');
+}
 
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const RUN = process.env.RUN_DIR || join(HERE, 'runs', `${BUNDLE}__explore__${stamp}`);
@@ -65,9 +81,9 @@ function appAbout() {
 }
 const ABOUT = appAbout();
 
-const driver = createMobileDriver({ BUNDLE, DEVICE, LAUNCH_WAIT, RUN });
+const driver = createMobileDriver({ BUNDLE, DEVICE, LAUNCH_WAIT, RUN, RESET });
 await runExplore({ driver, cfg: {
   MODEL, GLOBAL_STEPS, GOAL, FOCUS, FLOW_MIN_STEPS, RUN, STATE,
-  ABOUT, credLine, APP_INSTRUCTIONS, instrPath, exploreSystem, TURN,
+  ABOUT, credLine, APP_INSTRUCTIONS, instrPath, exploreSystem, TURN, ENTRY,
 } });
 process.exit(0);

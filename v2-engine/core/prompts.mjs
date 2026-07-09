@@ -10,7 +10,7 @@
 
 // Shared QA doctrine — the testing mindset, about-the-app context, exploration heuristics,
 // and stop criteria. Used by the LLM-driven explorer and the legacy judge prompt.
-export const explorationDoctrine = ({ about, goal, focus }) => `
+export const explorationDoctrine = ({ about, goal, focus, entry }) => `
 You are a QA tester doing the most in-depth testing of all possible areas and as many edge
 cases as you can. Your job is to thoroughly test this app — visit every screen, exercise every
 feature, push edge cases, and report anything broken, confusing, or visually off.
@@ -21,7 +21,7 @@ ${about}
 Approach it like a smart real user: first work through the app's MAIN flows — the home screen
 and the primary features — trying out most of the features and the different feature TYPES;
 only AFTER covering those, move into settings, account, and the peripheral / less-obvious areas.
-Be thorough but natural, the way a power user who wants to try everything would.${goal ? `\n\nExtra focus for this run: ${goal}` : ''}${focus ? `\n\nUSER-DIRECTED FOCUS FOR THIS RUN — the person running this test explicitly asked you to prioritize the following. Weight it heavily and make sure it is thoroughly covered, without entirely skipping the rest of the app:\n${focus}` : ''}
+Be thorough but natural, the way a power user who wants to try everything would.${entry ? `\n\n${entry}` : ''}${goal ? `\n\nExtra focus for this run: ${goal}` : ''}${focus ? `\n\nUSER-DIRECTED FOCUS FOR THIS RUN — the person running this test explicitly asked you to prioritize the following. Weight it heavily and make sure it is thoroughly covered, without entirely skipping the rest of the app:\n${focus}` : ''}
 
 HOW TO EXPLORE — the core loop. After each action, ask yourself:
 1. Did what I expected happen? (compare the actual result to your mental model)
@@ -83,8 +83,8 @@ SETTINGS ↔ FEATURES (mandatory — do not skip):
 //                   rule (must start and end with '\n' when non-empty)
 //   escapeVerb      'back out' | 'navigate'
 //   sizeLabel       'SCREEN SIZE' | 'VIEWPORT'
-export const makeExploreSystem = (p) => ({ about, size, goal, focus, credLine, memory, coverage, appInstructions }) => `
-${explorationDoctrine({ about, goal, focus })}
+export const makeExploreSystem = (p) => ({ about, size, goal, focus, entry, credLine, memory, coverage, appInstructions }) => `
+${explorationDoctrine({ about, goal, focus, entry })}
 ${appInstructions ? `\nAPP-SPECIFIC TEST INSTRUCTIONS (specific to THIS app — follow these closely, in addition to the general approach above):\n${appInstructions}\n` : ''}
 ${credLine}
 

@@ -10,6 +10,7 @@ import { createOpenRouter } from '@openrouter/ai-sdk-provider';
 import { z } from 'zod';
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { normalizedElBoxes, normalizedStyleBoxes, sanitizeBbox, pngSize } from './bbox.mjs';
 
 const FLAW = z.object({
   type: z.enum(['visual', 'content', 'copy', 'layout', 'functional', 'a11y', 'performance']),
@@ -23,27 +24,15 @@ const FLAW = z.object({
 });
 const CRITIQUE = z.object({ verdict: z.string(), flaws: z.array(FLAW) });
 
-// VLMs are unreliable at estimating pixel coordinates from an image alone, so when the
-// explore pass saved the screen's accessibility elements (elements.jsonl, with their
-// coordinate space), we ground the critique: the prompt lists every element with its TRUE
-// normalized box, the model just names the element it means (elementIndex), and we snap
-// the flaw's bbox to that element's real rect. Model-drawn bboxes are only a fallback.
-const MIN_EL_PT = 20; // coord-space units; some a11y els report a bare center point (w/h 0)
-function normalizedElBoxes(entry) {
-  if (!entry?.space?.w || !entry?.space?.h) return null;
-  const { w: SW, h: SH } = entry.space;
-  const boxes = (entry.els || []).map((e) => {
-    if (e.x == null || e.y == null) return null;
-    const w = Math.max(e.w || 0, MIN_EL_PT), h = Math.max(e.h || 0, MIN_EL_PT);
-    const clamp = (v) => Math.min(1, Math.max(0, v));
-    return {
-      label: e.label, type: e.type,
-      x0: clamp((e.x - w / 2) / SW), y0: clamp((e.y - h / 2) / SH),
-      x1: clamp((e.x + w / 2) / SW), y1: clamp((e.y + h / 2) / SH),
-    };
-  });
-  return boxes.some(Boolean) ? boxes : null;
-}
+// VLMs are unreliable at estimating pixel coordinates from an image alone, so we ground the
+// critique: the prompt lists every element with its TRUE normalized box, the model just names
+// the element it means (elementIndex), and we snap the flaw's bbox to that element's real
+// rect. Grounding source per platform (helpers in core/bbox.mjs):
+//   mobile — a11y elements saved per screenshot (elements.jsonl, with coordinate space)
+//   web    — the style sweep saved per screenshot (styles/<shot>.json, page px = image px);
+//            web a11y elements carry NO coordinates, so without this every web bbox was a
+//            freehand guess, and freehand guesses routinely come back in pixels — drawn
+//            off-canvas by annotate. Model-drawn bboxes are only a sanitized fallback.
 const fmt = (v) => v.toFixed(3);
 const elementsBlock = (boxes) => `ELEMENTS on this screen (from the accessibility tree), with their true normalized boxes (x0,y0,x1,y1):
 ${boxes.map((b, i) => b ? `[${i}] "${b.label}"${b.type ? ` (${b.type})` : ''} box=(${fmt(b.x0)},${fmt(b.y0)},${fmt(b.x1)},${fmt(b.y1)})` : null).filter(Boolean).join('\n')}
@@ -78,8 +67,18 @@ export async function critiqueRun(runDir, { rubricPath, envHint, critiqueSystem,
   for (const s of shots) {
     const path = join(runDir, s.file);
     if (!existsSync(path)) continue;
-    const b64 = readFileSync(path).toString('base64');
-    const boxes = normalizedElBoxes(elsByShot.get(s.file));
+    const buf = readFileSync(path);
+    const b64 = buf.toString('base64');
+    const dims = pngSize(buf);
+    const elEntry = elsByShot.get(s.file);
+    let boxes = normalizedElBoxes(elEntry?.space, elEntry?.els);
+    if (!boxes) {
+      const stylesPath = join(runDir, 'styles', s.file.replace(/^screenshots\//, '').replace(/\.png$/, '.json'));
+      if (existsSync(stylesPath)) {
+        try { boxes = normalizedStyleBoxes(JSON.parse(readFileSync(stylesPath, 'utf8')), dims); } catch { /* grounding is best-effort */ }
+      }
+    }
+    if (!boxes) console.log(`   ⚠ no grounding source for ${s.file} — flaw boxes will be freehand (annotation accuracy degraded)`);
     const { object } = await generateObject({
       model, schema: CRITIQUE,
       messages: [
@@ -93,7 +92,7 @@ export async function critiqueRun(runDir, { rubricPath, envHint, critiqueSystem,
     });
     const flaws = object.flaws.map((f) => {
       const el = (boxes && f.elementIndex != null) ? boxes[f.elementIndex] : null;
-      const bbox = el ? { x0: el.x0, y0: el.y0, x1: el.x1, y1: el.y1 } : f.bbox;
+      const bbox = el ? { x0: el.x0, y0: el.y0, x1: el.x1, y1: el.y1 } : sanitizeBbox(f.bbox, dims);
       return { id: `C-${String(++flawN).padStart(3, '0')}`, ...f, bbox };
     });
     appendFileSync(out, JSON.stringify({ screenshot: s.file, screen: s.screen, verdict: object.verdict, flaws }) + '\n');

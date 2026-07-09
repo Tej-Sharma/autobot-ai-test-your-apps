@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { runExplore, credLineOf } from '../core/explore.mjs';
+import { runExplore, credLineOf, signupCreds, entryLineOf } from '../core/explore.mjs';
 import { exploreSystem } from './prompts.mjs';
 import { TURN } from './schema.mjs';
 import { createWebDriver } from './driver.mjs';
@@ -30,7 +30,20 @@ const inputsPath = join(process.env.INPUTS_DIR || join(HERE, 'inputs'), `${TARGE
 const INPUTS = existsSync(inputsPath) ? JSON.parse(readFileSync(inputsPath, 'utf8')) : {};
 if (!INPUTS.url) { console.error(`Need inputs/${TARGET}.json with a "url" field.`); process.exit(1); }
 const START_URL = INPUTS.url;
-const credLine = credLineOf(INPUTS);
+
+// Entry mode (MODE=login|signup, unset = test from the site's current state). No app-reset
+// step on web — the driver already starts a fresh browser context, so "fresh state" holds.
+const MODE = (process.env.MODE || '').toLowerCase();
+let credLine = credLineOf(INPUTS), ENTRY = '';
+if (MODE === 'signup') {
+  const creds = signupCreds();
+  ENTRY = entryLineOf('signup', creds);
+  credLine = credLineOf({ credentials: creds });
+  console.log(`entry mode: signup — generated test credentials: ${creds.username} / ${creds.password} (log-only, not saved)`);
+} else if (MODE === 'login' && INPUTS.credentials) {
+  ENTRY = entryLineOf('login');
+  console.log('entry mode: login — signing in with saved credentials first');
+}
 const ABOUT = INPUTS.about ? String(INPUTS.about).trim() : `No description provided for ${START_URL} — explore the UI to learn what it does and offers.`;
 // app-specific test instructions, auto-loaded by target id: instructions/<target>.md
 const instrPath = join(HERE, 'instructions', `${TARGET}.md`);
@@ -43,6 +56,6 @@ const STATE = process.env.STATE_GRAPH || join(RUN, 'state-graph.json');
 const driver = createWebDriver({ TARGET, START_URL, NAV_WAIT, VIEWPORT, RUN });
 await runExplore({ driver, cfg: {
   MODEL, GLOBAL_STEPS, GOAL, FOCUS, FLOW_MIN_STEPS, RUN, STATE,
-  ABOUT, credLine, APP_INSTRUCTIONS, instrPath, exploreSystem, TURN,
+  ABOUT, credLine, APP_INSTRUCTIONS, instrPath, exploreSystem, TURN, ENTRY,
 } });
 process.exit(0);
